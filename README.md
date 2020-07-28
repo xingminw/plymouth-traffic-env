@@ -85,24 +85,3 @@ python
 import traci
 import libsumo
 ```
-
-#### (Optional after installment) Define the env variable
-
-To predefine the env variable (you need to define the env variable for each time), you can choose either way:
-
-1. Change the configuration file of the terminal (can only used for running code directly at terminal). Add the definitation of the env variable to the file ```~/.bashrc```. You can use any editor in terminal including ```nano``` or ```gedit```. For example:
-
-```
-gedit ~/.bashrc
-```
-  Then add the following sentence (any row) to the file ```~/.bashrc```:
-```
-export SUMO_HOME="$env_path"
-```
-2. (Recommend) Add the following code to the python project before importing sumo libs:
-
-```
-os.environ["SUMO_HOME"] = "$env_path"
-```
-
-
