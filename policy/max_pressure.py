@@ -272,8 +272,8 @@ class MaxPressurePolicy(MaxPressureTorchPolicy):
         phase_separate_list = self.action_space.nvec
         phase_weights = [phase_weight_list[: phase_separate_list[0]]]
 
-        cursor_start = torch.tensor(0)
-        cursor_end = torch.tensor(phase_separate_list[0])
+        cursor_start = 0
+        cursor_end = phase_separate_list[0]
         for idx in range(len(phase_separate_list) - 1):
             current_phases = phase_separate_list[idx]
             next_phases = phase_separate_list[idx + 1]
@@ -287,7 +287,3 @@ class MaxPressurePolicy(MaxPressureTorchPolicy):
             action_list.append(int(phase_id))
 
         return action_list
-
-
-def return_none_actor():
-    return None

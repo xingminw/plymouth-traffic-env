@@ -238,6 +238,7 @@ class SignalizedNetwork(gym.Env, ABC):
         return random_seed
 
     def _close_simulator(self):
+
         if self._is_open:
             # close simulation
             traci.close()
@@ -251,7 +252,7 @@ class SignalizedNetwork(gym.Env, ABC):
 
             # reset the is open flag
             self._is_open = False
-        # self._clear_simulator_parameters()
+        delete_buffer_file(self.sumo_seed)
 
     def _clear_simulator_parameters(self):
         """
@@ -327,8 +328,6 @@ class SignalizedNetwork(gym.Env, ABC):
 
         # start the simulation
         traci.start(sumo_cmd)
-
-        delete_buffer_file(self.sumo_seed)
 
         # reset the simulation state flag
         self._is_open = True

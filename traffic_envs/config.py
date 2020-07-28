@@ -5,10 +5,10 @@ from shutil import copyfile, rmtree
 # customize your own sumo env address!!
 # for windows system, choose the place you install sumo
 # TODO: add auto-recognition of the sumo folder path
-os.environ["SUMO_HOME"] = "/home/xingminw/Anaconda3/envs/traffic-env"
+os.environ["SUMO_HOME"] = "C://Program Files (x86)//Eclipse//Sumo"
 
 # gui mode, true to use traci, false to use libsumo, check your installment of libsumo
-GUI_MODE = False
+GUI_MODE = True
 
 # random mode, true to use random demand, false to use the fixed random seed
 RANDOM_MODE = True
