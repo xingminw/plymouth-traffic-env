@@ -1,11 +1,11 @@
 ## Test Code
 
-You need first change the location of the SUMO installment at ```traffic_envs.config.py``` line 8, 
+1. Put the foler named ```sumo``` (currently private) including the configuration file to this project.
+2. Change the location of the SUMO installment at ```traffic_envs.config.py``` line 8, 
 ```
 os.environ["SUMO_HOME"] = "$your_sumo_path"
 ```
-
-Run the following code to see the traffic simulation environment:
+3. Run the following code to see the traffic simulation environment:
 
 ```
 python env_test.py
