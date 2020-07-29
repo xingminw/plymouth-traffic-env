@@ -1,5 +1,7 @@
 # Traffic Environment of Plymouth Rd., Ann Arbor MI.
 
+![Plymouth Rd](../figs/plymouth.png)
+
 ## Usage
 
 This environment follows the framework of [openai.gym](https://gym.openai.com/).
@@ -39,7 +41,25 @@ File ```observation_guidance.json``` in the folder ```sumo``` provided some info
 
 The input action is list with 6 integer values for the phase id for each intersection.
 
+```python
+env = SignalizedNetwork()
+env.action_space = gym.Spaces.MultiDiscrete([9 3 9 3 9 9])
+
+```
+Signalized intersection list
+
+| Signal Id | Intersection Name | Types | Number of Phases |
+|-----------|-------------------|-------| -----------------|
+|62477148 |  Nixon   | Four-legs | 9 |
+|62500567 | Barton   | Three-legs | 3 |
+| 62500824 | Huron | Four-legs | 9 |
+| 62532012  | Traverwood | Three-legs | 3 |
+| 62606176  | Green | Four-legs | 9|
+| 767530322 | Murfin | Three-legs | 3|
+
 ## Signal Phase and Network Topology
+
+![network topology](../figs/network.png)
 
 Phases of an intersection is defined in the file ```plymouthv8.net.xml```:
 
@@ -56,6 +76,10 @@ Phases of an intersection is defined in the file ```plymouthv8.net.xml```:
     <phase duration="20"  state="grrrgrrgrrrgGG"/>
 </tlLogic>
 ```
+
+![Signal Phase](../figs/phase.png)
+
+Line 1-9 correponds to Phase 1-Phase 9. Right-turn movement is regarded as green light all the time (yield to all the other directions). 
 
 ## Set Configuration File
 
