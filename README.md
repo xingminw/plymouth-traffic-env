@@ -29,6 +29,7 @@ pip install e .
 ```
 
 I also put a max-pressure controller in this environment as an example controller. This controller uses the PyTorch package, you should download the [PyTorch](https://pytorch.org/get-started/locally/) to use the max-weight controller. 
+> The current max-weight controller is not tested yet. There might be some errors with it.
 
 ### Installment of SUMO
 

@@ -11,8 +11,13 @@ from traffic_envs.traffic_env import SignalizedNetwork
 def run_env():
     # make new gym env
     env = SignalizedNetwork()
+    print(env.action_space)
     # enable output figure
     env.output_cost = True
+
+    # set relative demand level
+    env.relative_demand = 0.5
+
     # create actor
     actor = Controller(env.action_space)
 

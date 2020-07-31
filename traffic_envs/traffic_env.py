@@ -38,7 +38,7 @@ class SignalizedNetwork(gym.Env, ABC):
                  cost=0, delay_list=None, long_waiting_penalty=0.3, _use_random_seed=True,
                  _is_open=False, observation_space=None, action_space=None, observation_mapping_details=None,
                  save_trajs=False, observation=None, output_cost=False, sumo_seed=None, long_waiting_clip=5,
-                 actuate_control=False):
+                 actuate_control=False, relative_demand=1):
         """
 
         :param terminate_steps: total time slots to terminate the simulation
@@ -65,6 +65,7 @@ class SignalizedNetwork(gym.Env, ABC):
         :param observation:
         :param long_waiting_clip:
         :param actuate_control:
+        :param relative_demand:
         """
         # initiate the attributes and parameters of the simulation
         self.signals = signals
@@ -79,6 +80,7 @@ class SignalizedNetwork(gym.Env, ABC):
         self.output_cost = output_cost
         self.terminate_steps = terminate_steps
         self.actuate_control = actuate_control
+        self.relative_demand = relative_demand
 
         self.sumo_seed = sumo_seed
         self._use_random_seed = _use_random_seed
@@ -311,7 +313,8 @@ class SignalizedNetwork(gym.Env, ABC):
             self.sumo_seed = self._generate_random_seed()
 
         # generate new arrival file
-        configuration_file_name, loaded_vehicles_list = generate_new_route_configuration(self.sumo_seed)
+        configuration_file_name, loaded_vehicles_list =\
+            generate_new_route_configuration(self.sumo_seed, self.relative_demand)
         self.loaded_list = np.cumsum(loaded_vehicles_list)
 
         print("Start new simulation with random seeds", self.sumo_seed, "...")
