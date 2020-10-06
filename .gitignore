@@ -127,5 +127,3 @@ dmypy.json
 sumo/
 
 .idea/
-
-output/figs/

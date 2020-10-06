@@ -1,5 +1,6 @@
 import os
 import sys
+from glob import glob
 from shutil import copyfile, rmtree
 
 # customize your own sumo env address!!
@@ -77,6 +78,18 @@ turning_ratio = {"62606176": {0: 0.224, 1: 0.708 / 2, 2: 0.708 / 2, 3: 0.068, 4:
                                8: 0.954 / 2, 9: 0.954 / 2, 10: 0.006, 11: 0.286, 12: 0.111, 13: 0.603},
                  "62500567": {0: 0.396, 1: 0.604 / 2, 2: 0.604 / 2, 3: 0.819 / 2,
                               4: 0.819 / 2, 5: 0.181, 6: 0.27, 7: 0.73}}
+
+corridor_e2w = ["-225624117#3+-225624117#2", "-411672987#1+-411672987#0", "-412646493#2+-412646493#1",
+                "-441190747#6+-441190747#5", "-412647185#1+-412647185#0", "-222786838#1+-222786838#0",
+                "-441142717#1+-441142717#0"]
+corridor_w2e = ["441142721#4+441142717#0", "406019854#0+406019854#1", "441142718#0+441142718#1",
+                "441190747#0+441190747#1", "441190747#7+441190747#8", "222786843#1+441190750#1",
+                "411653583#0+411653583#1"]
+
+intersection_name_list = ["Barton", "Murfin", "Traverwood", "Nixon", "Huron", "Green"]
+
+side_street_files = glob("figs/network_links/side/*.png")
+side_street_links = [val.split("/")[-1].split(".")[0] for val in side_street_files]
 
 if 'SUMO_HOME' in os.environ:
     tools = os.path.join(os.environ['SUMO_HOME'], 'tools')

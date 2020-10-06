@@ -1,10 +1,10 @@
 import numpy as np
-try:
-    from policy.max_pressure import MaxPressurePolicy as Controller
-    print("Using the max pressure controller")
-except ImportError:
-    from policy.null_policy import NullPolicy as Controller
-    print("Using the default actuate controller")
+# try:
+#     from policy.max_pressure import MaxPressurePolicy as Controller
+#     print("Using the max pressure controller")
+# except ImportError:
+from policy.null_policy import NullPolicy as Controller
+print("Using the default actuate controller")
 from traffic_envs.traffic_env import SignalizedNetwork
 
 
@@ -17,8 +17,8 @@ def run_env():
     env.output_cost = True                  # enable output figure
     env.penetration_rate = 0.2              # set the penetration rate
     env.save_trajs = True                   # enable output trajectories
-    env.relative_demand = 0.3               # set relative demand level
-    env.terminate_steps = 200               # set the simulation steps
+    env.relative_demand = 0.5               # set relative demand level
+    env.terminate_steps = 3599               # set the simulation steps (MAXIMUM: 3599)
     env.set_mode(actuate_control=True)      # set the controller to be an actuate control
     env.seed(-1)                            # set a random seed for all tests
 

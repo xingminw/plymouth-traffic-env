@@ -74,6 +74,7 @@ class SignalizedNetwork(gym.Env, ABC):
         self.actuate_control = actuate_control              # set True to apply actuate control
         self.relative_demand = relative_demand              # relative demand level, demand times relative demand
         self.save_trajs = save_trajs                        # set True to output the trajectories
+        self.visualize_network_topology = False             # flag to visualize the network topology
 
         # signalized intersection
         self.signals = signals
@@ -96,6 +97,8 @@ class SignalizedNetwork(gym.Env, ABC):
         self._is_open = _is_open
 
         self._long_waiting_clip = long_waiting_clip
+        self._connected_vehicle_list = []
+        self._ordinary_vehicle_list = []
 
         # buffer data of the traffic state
         # this buffer data must be reset when the simulation is reset
@@ -219,6 +222,61 @@ class SignalizedNetwork(gym.Env, ABC):
         with open(trajs_json_file, "w") as temp_file:
             json.dump(trajectory_by_link_dict, temp_file)
 
+        # output spat info
+        spat_dict = {}
+        for signal_id in self.signals.keys():
+            signal = self.signals[signal_id]
+            spat_dict[signal_id] = {}
+            movements = signal.movements
+            for movement_id in movements.keys():
+                movement = movements[movement_id]
+                movement_state = movement.state_list
+                spat_dict[signal_id][movement_id] = movement_state
+
+        spat_json_file = os.path.join(output_folder, "spat.json")
+        with open(spat_json_file, "w") as temp_file:
+            json.dump(spat_dict, temp_file)
+
+        # output time space diagram
+        self._output_corridor_time_space_diagram(config.corridor_w2e,
+                                                 os.path.join(output_folder, "w2e_corridor.png"),
+                                                 config.intersection_name_list)
+        self._output_corridor_time_space_diagram(config.corridor_e2w,
+                                                 os.path.join(output_folder, "e2w_corridor.png"),
+                                                 config.intersection_name_list[::-1])
+
+    def _output_corridor_time_space_diagram(self, link_list, file_name, signals):
+        start_dis = 0
+        buffer = 5
+        landmark_list = []
+        plt.figure(figsize=[10, 10])
+        for link_id in link_list:
+            link = self.links[link_id]
+            link_length = link.length
+
+            trajectories = link.trajectories
+            for trip_id in trajectories.keys():
+                trip_time = trajectories[trip_id]["time"]
+                trip_dis = trajectories[trip_id]["distance"]
+                trip_type = trajectories[trip_id]["type"]
+                trip_dis = [val + start_dis for val in trip_dis]
+
+                if not trip_type:
+                    plt.plot(trip_time, trip_dis, "k", linewidth=0.5, alpha=0.3)
+                else:
+                    plt.plot(trip_time, trip_dis, "b", linewidth=0.8, alpha=0.5)
+            start_dis = start_dis + link_length + buffer
+            landmark_list.append(start_dis)
+        landmark_list = landmark_list[:-1]
+        plt.yticks(landmark_list, signals)
+        plt.xlim([0, 3600])
+        plt.ylim([0, start_dis])
+        # plt.tight_layout()
+        plt.xlabel("Time (s)")
+        plt.ylabel("Distance")
+        plt.savefig(file_name, dpi=300)
+        plt.close()
+
     def output_network_performance(self, additional_name=None):
         fig, ax1 = plt.subplots()
 
@@ -296,6 +354,16 @@ class SignalizedNetwork(gym.Env, ABC):
         self.vehicles = {}
         self.blocked_list = []
         self._total_departure = 0
+        # clear the signal state
+        for signal_id in self.signals.keys():
+            signal = self.signals[signal_id]
+            movements = signal.movements
+            for movement_id in movements.keys():
+                self.signals[signal_id].movements[movement_id].state_list = []
+
+        # clear the vehicle ids
+        self._connected_vehicle_list = []
+        self._ordinary_vehicle_list = []
 
     def _generate_observation(self):
         link_list = [val[0] for val in self.observation_mapping_details["links"]]
@@ -513,6 +581,22 @@ class SignalizedNetwork(gym.Env, ABC):
         # update the loaded vehicles
         time_step = traci.simulation.getTime()
 
+        # load signal state
+        signal_list = self.observation_mapping_details["signals"]
+        for signal_id in signal_list:
+            local_state = traci.trafficlight_getRedYellowGreenState(signal_id)
+            binary_state_list = []
+            for state_idx in range(len(local_state)):
+                single_state = local_state[state_idx]
+                if single_state == "G" or single_state == "g":
+                    binary_state = 1
+                else:
+                    binary_state = 0
+                binary_state_list.append(binary_state)
+                movement_id = list(self.signals[signal_id].movements)[state_idx]
+                self.signals[signal_id].movements[movement_id].state_list.append(binary_state)
+            self.signals[signal_id].observed_state = binary_state_list
+
         # load useful information from simulation
         current_departure = int(traci.simulation.getDepartedNumber())
         self._total_departure += current_departure
@@ -545,6 +629,14 @@ class SignalizedNetwork(gym.Env, ABC):
             if link_pos is not None:
                 link_pos += edge_pos
 
+            # label the vehicle as CV or ordinary vehicle
+            all_vehicles_id = self._ordinary_vehicle_list + self._ordinary_vehicle_list
+            if not (vehicle_id in all_vehicles_id):
+                if random() > self.penetration_rate:
+                    self._ordinary_vehicle_list.append(vehicle_id)
+                else:
+                    self._connected_vehicle_list.append(vehicle_id)
+
             # # the following code is to dump the data to vehicle class
             # if self.penetration_rate is not None:
             #     if not (vehicle_id in self.vehicles.keys()):
@@ -574,7 +666,8 @@ class SignalizedNetwork(gym.Env, ABC):
             if self.penetration_rate is not None:
                 if not (vehicle_id in self.links[vehicle_link].trajectories.keys()):
                     self.links[vehicle_link].trajectories[vehicle_id] =\
-                        {"time": [], "speed": [], "distance": [], "lane": []}
+                        {"time": [], "speed": [], "distance": [], "lane": [],
+                         "type": vehicle_id in self._connected_vehicle_list}
                 self.links[vehicle_link].trajectories[vehicle_id]["time"].append(time_step)
                 self.links[vehicle_link].trajectories[vehicle_id]["speed"].append(vehicle_speed)
                 self.links[vehicle_link].trajectories[vehicle_id]["distance"].append(link_pos)
@@ -859,6 +952,23 @@ class SignalizedNetwork(gym.Env, ABC):
 
         # load turning ratio
         self._load_movement_turning_ratio()
+
+        if self.visualize_network_topology:
+            self.output_network_topology_illustration()
+
+    def output_network_topology_illustration(self):
+        output_folder = "figs"
+        for link_id in self.links.keys():
+            plt.figure(figsize=[12, 5])
+            link = self.links[link_id]
+
+            for internal_link_id in self.links.keys():
+                internal_link = self.links[internal_link_id]
+                plt.plot(internal_link.shape[0], internal_link.shape[1], "k")
+            plt.title(link_id)
+            plt.plot(link.shape[0], link.shape[1], linewidth=2, color="red")
+            plt.savefig(os.path.join(output_folder, link_id+".png"))
+            plt.close()
 
     def _load_movement_turning_ratio(self):
         """called by the _load_network_topology
@@ -1216,7 +1326,7 @@ class Phase(object):
 class Signal(object):
     def __init__(self, signal_id, phases=None, movements=None,
                  current_state=None, force_duration=0,
-                 previous_phase=None, desired_phase=None):
+                 previous_phase=None, desired_phase=None, observed_state=None):
         """
         class of signal timing plan and signalized intersection
         :param signal_id:
@@ -1226,12 +1336,14 @@ class Signal(object):
         :param force_duration:
         :param previous_phase:
         :param desired_phase:
+        :param observed_state:
         """
         self.previous_phase = previous_phase
         self.desired_phase = desired_phase
         self.signal_id = signal_id
         self.current_state = current_state
         self.force_duration = force_duration
+        self.observed_state = observed_state
         self.clearance_time = 2
         self.yellow_time = 3
         if phases is None:
@@ -1283,22 +1395,13 @@ class Link(object):
         else:
             self.edge_list = edge_list
 
-    def generate_time_space_diagram(self):
-        plt.figure()
-        for vehicle_id in self.trajectories.keys():
-            vehicle_dict = self.trajectories[vehicle_id]
-            # lane_list = vehicle_dict["lane"]
-            time_list = vehicle_dict["time"]
-            distance_list = vehicle_dict["distance"]
-            plt.plot(time_list, distance_list, "k-", lw=0.5)
-        plt.show()
-
 
 class Movement(object):
     def __init__(self, movement_id, intersection_id=None, direction=None,
                  enter_lane=None, exit_lane=None,
                  enter_link=None, exit_link=None, turning_ratio=1/3,
-                 upstream_weight=None, downstream_weight=None, turning_coefficient_matrix=None):
+                 upstream_weight=None, downstream_weight=None, turning_coefficient_matrix=None,
+                 state_list=None):
         """
         a movement is defined as inflow lane and the corresponding
             outflow lane at a signalized intersection
@@ -1313,6 +1416,7 @@ class Movement(object):
         :param upstream_weight:
         :param downstream_weight:
         :param turning_coefficient_matrix:
+        :param state_list:
         """
         self.intersection_id = intersection_id
         self.movement_id = movement_id
@@ -1325,3 +1429,8 @@ class Movement(object):
         self.upstream_weight = upstream_weight
         self.downstream_weight = downstream_weight
         self.turning_coefficient_matrix = turning_coefficient_matrix
+
+        if state_list is None:
+            self.state_list = []
+        else:
+            self.state_list = state_list
