@@ -285,5 +285,4 @@ class MaxPressurePolicy(MaxPressureTorchPolicy):
         for phase_weight in phase_weights:
             phase_id = torch.argmax(phase_weight)
             action_list.append(int(phase_id))
-
         return action_list

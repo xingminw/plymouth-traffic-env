@@ -67,27 +67,34 @@ class SignalizedNetwork(gym.Env, ABC):
         :param actuate_control:
         :param relative_demand:
         """
-        # initiate the attributes and parameters of the simulation
+        # simulation parameters
+        self.penetration_rate = 0.15                        # set to be None to disable the CV environment
+        self.output_cost = output_cost                      # true to output the cost curve
+        self.terminate_steps = terminate_steps              # total simulation steps
+        self.actuate_control = actuate_control              # set True to apply actuate control
+        self.relative_demand = relative_demand              # relative demand level, demand times relative demand
+        self.save_trajs = save_trajs                        # set True to output the trajectories
+
+        # signalized intersection
         self.signals = signals
+
+        # network topology
         self.edges = edges
         self.lanes = lanes
         self.junctions = junctions
         self.links = links
+
         self.observation_space = observation_space
         self.action_space = action_space
         self.observation_mapping_details = observation_mapping_details
         self.observation = observation
-        self.output_cost = output_cost
-        self.terminate_steps = terminate_steps
-        self.actuate_control = actuate_control
-        self.relative_demand = relative_demand
 
         self.sumo_seed = sumo_seed
         self._use_random_seed = _use_random_seed
         self._long_waiting_penalty = long_waiting_penalty
         self._resolution = resolution
         self._is_open = _is_open
-        self._save_trajs = save_trajs
+
         self._long_waiting_clip = long_waiting_clip
 
         # buffer data of the traffic state
@@ -195,6 +202,23 @@ class SignalizedNetwork(gym.Env, ABC):
         self.actuate_control = actuate_control
         self._load_network_topology()
 
+    def output_vehicle_trajectory(self):
+        if not os.path.exists(config.output_trajs_folder):
+            os.mkdir(config.output_trajs_folder)
+        output_folder = os.path.join(config.output_trajs_folder, str(self.sumo_seed))
+        os.mkdir(output_folder)
+
+        # output json file
+        trajectory_by_link_dict = {}
+        for link_id in self.links.keys():
+            link = self.links[link_id]
+            trajectories = link.trajectories
+            trajectory_by_link_dict[link_id] = trajectories
+
+        trajs_json_file = os.path.join(output_folder, "trajs.json")
+        with open(trajs_json_file, "w") as temp_file:
+            json.dump(trajectory_by_link_dict, temp_file)
+
     def output_network_performance(self, additional_name=None):
         fig, ax1 = plt.subplots()
 
@@ -248,6 +272,9 @@ class SignalizedNetwork(gym.Env, ABC):
             # output the figure
             if self.output_cost:
                 self.output_network_performance()
+
+            if self.save_trajs:
+                self.output_vehicle_trajectory()
 
             # close simulator
             print("Close simulation with random seeds", self.sumo_seed, "done.")
@@ -486,9 +513,7 @@ class SignalizedNetwork(gym.Env, ABC):
         # update the loaded vehicles
         time_step = traci.simulation.getTime()
 
-        save_trajs = self._save_trajs
         # load useful information from simulation
-
         current_departure = int(traci.simulation.getDepartedNumber())
         self._total_departure += current_departure
         current_blocked_num = self.loaded_list[int(time_step) - 1] - self._total_departure
@@ -520,16 +545,17 @@ class SignalizedNetwork(gym.Env, ABC):
             if link_pos is not None:
                 link_pos += edge_pos
 
-            if save_trajs:
-                if not (vehicle_id in self.vehicles.keys()):
-                    self.vehicles[vehicle_id] = Vehicle(vehicle_id)
-                self.vehicles[vehicle_id].speed_list.append(vehicle_speed)
-                self.vehicles[vehicle_id].lane_list.append(vehicle_lane)
-                self.vehicles[vehicle_id].waiting_time_list.append(waiting_time)
-                self.vehicles[vehicle_id].link_list.append(vehicle_link)
-                self.vehicles[vehicle_id].edge_list.append(vehicle_edge)
-                self.vehicles[vehicle_id].lane_pos_list.append(edge_pos)
-                self.vehicles[vehicle_id].link_pos_list.append(link_pos)
+            # # the following code is to dump the data to vehicle class
+            # if self.penetration_rate is not None:
+            #     if not (vehicle_id in self.vehicles.keys()):
+            #         self.vehicles[vehicle_id] = Vehicle(vehicle_id)
+            #     self.vehicles[vehicle_id].speed_list.append(vehicle_speed)
+            #     self.vehicles[vehicle_id].lane_list.append(vehicle_lane)
+            #     self.vehicles[vehicle_id].waiting_time_list.append(waiting_time)
+            #     self.vehicles[vehicle_id].link_list.append(vehicle_link)
+            #     self.vehicles[vehicle_id].edge_list.append(vehicle_edge)
+            #     self.vehicles[vehicle_id].lane_pos_list.append(edge_pos)
+            #     self.vehicles[vehicle_id].link_pos_list.append(link_pos)
             if vehicle_link is None:
                 continue
 
@@ -545,15 +571,14 @@ class SignalizedNetwork(gym.Env, ABC):
             link_vehicle_dict[vehicle_link]["cost"] +=\
                 local_delay * np.clip(pow(waiting_time, self._long_waiting_penalty), 1, self._long_waiting_clip)
 
-            # # cancel the following code to stop saving the detailed trajectories
-            if save_trajs:
+            if self.penetration_rate is not None:
                 if not (vehicle_id in self.links[vehicle_link].trajectories.keys()):
                     self.links[vehicle_link].trajectories[vehicle_id] =\
                         {"time": [], "speed": [], "distance": [], "lane": []}
                 self.links[vehicle_link].trajectories[vehicle_id]["time"].append(time_step)
                 self.links[vehicle_link].trajectories[vehicle_id]["speed"].append(vehicle_speed)
                 self.links[vehicle_link].trajectories[vehicle_id]["distance"].append(link_pos)
-                self.links[vehicle_link].trajectories[vehicle_id]["lane"].append(lane)
+                self.links[vehicle_link].trajectories[vehicle_id]["lane"].append(int(vehicle_lane[-1]))
         system_delay = current_blocked_num
         system_cost = self._long_waiting_clip * current_blocked_num
 
@@ -590,9 +615,6 @@ class SignalizedNetwork(gym.Env, ABC):
             self.links[link_id].current_density = density_matrix
             self.links[link_id].current_density = stopped_density
             self.links[link_id].current_vehs = np.sum(density_matrix)
-            # self.links[link_id].cost += link_vehicle_dict[link_id]["cost"]
-            # self.links[link_id].cost_list.append(link_vehicle_dict[link_id]["cost"])
-            # self.links[link_id].delay_list.append(link_vehicle_dict[link_id]["delay"])
 
             system_cost += link_vehicle_dict[link_id]["cost"]
             system_delay += link_vehicle_dict[link_id]["delay"]

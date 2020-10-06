@@ -9,7 +9,7 @@ from shutil import copyfile, rmtree
 os.environ["SUMO_HOME"] = "/home/xingminw/Anaconda3/envs/traffic-env"
 
 # gui mode, true to use traci, false to use libsumo, check your installment of libsumo
-GUI_MODE = True
+GUI_MODE = False
 
 # random mode, true to use random demand, false to use the fixed random seed
 RANDOM_MODE = True
@@ -59,6 +59,7 @@ buffer_network_xml = os.path.join(sumo_configuration_buffer_folder, network_xml_
 copyfile(network_xml_file_template, buffer_network_xml)
 
 output_figure_folder = "output/figs"
+output_trajs_folder = "output/trajs"
 output_data_folder = "output/data"
 output_observation_mapping_file = "sumo/observation_guidance.json"
 

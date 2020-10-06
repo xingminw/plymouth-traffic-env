@@ -11,27 +11,20 @@ from traffic_envs.traffic_env import SignalizedNetwork
 def run_env():
     # make new gym env
     env = SignalizedNetwork()
-    print(env.action_space)
-    # enable output figure
-    env.output_cost = True
+    print(env.action_space)                 # output action space
 
-    # set relative demand level
-    env.relative_demand = 0.5
+    # set the simulation parameters
+    env.output_cost = True                  # enable output figure
+    env.penetration_rate = 0.2              # set the penetration rate
+    env.save_trajs = True                   # enable output trajectories
+    env.relative_demand = 0.3               # set relative demand level
+    env.terminate_steps = 200               # set the simulation steps
+    env.set_mode(actuate_control=True)      # set the controller to be an actuate control
+    env.seed(-1)                            # set a random seed for all tests
 
-    # create actor
-    actor = Controller(env.action_space)
+    actor = Controller(env.action_space)    # create actor
+    obs = env.reset()                       # reset simulation and get new observation
 
-    # set a random seed for all tests
-    env.seed(-1)
-
-    # reset simulation and get new observation
-    obs = env.reset()
-    action = actor.get_action(obs)
-    if action is None:
-        env.set_mode(actuate_control=False)
-    else:
-        env.set_mode(actuate_control=True)
-    # with switching cost consideration
     total_reward = 0
     while True:
         action = actor.get_action(obs)
