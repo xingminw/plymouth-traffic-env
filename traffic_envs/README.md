@@ -93,3 +93,8 @@ GUI_MODE = True
 RANDOM_MODE = True
 ```
 
+## Output 
+
+### Corridor time-space diagram
+![Signal Phase](../figs/e2w_corridor.png)
+

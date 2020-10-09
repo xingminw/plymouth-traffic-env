@@ -244,6 +244,76 @@ class SignalizedNetwork(gym.Env, ABC):
         self._output_corridor_time_space_diagram(config.corridor_e2w,
                                                  os.path.join(output_folder, "e2w_corridor.png"),
                                                  config.intersection_name_list[::-1])
+        # self._output_link_time_space_diagram(os.path.join(output_folder, "link_ts"))
+
+    def _output_link_time_space_diagram(self, folder):
+        if not os.path.exists(folder):
+            os.mkdir(folder)
+
+        lane_colors = ["royalblue", "violet", "dimgrey", "orange", "salmon"]
+
+        for link_id in self.links.keys():
+            link = self.links[link_id]
+            trajectories = link.trajectories
+            lane_numbers = link.maximum_lane_number
+
+            plt.figure()
+            # create legend
+            for idx in range(lane_numbers):
+                plt.plot([], [], color=lane_colors[idx], label="Lane "+str(idx))
+            plt.plot([], [], "k:", label="Non-CV", lw=1.5)
+            plt.plot([], [], "k-", label="CV")
+            plt.legend()
+            for trip_id in trajectories.keys():
+                trip_time = trajectories[trip_id]["time"]
+                trip_dis = trajectories[trip_id]["distance"]
+                trip_type = trajectories[trip_id]["type"]
+                lanes = trajectories[trip_id]["lane"]
+                for idx in range(len(trip_time) - 1):
+                    lane_index = lanes[idx]
+                    dis_list = [trip_dis[idx] + lane_index, trip_dis[idx + 1] + lane_index]
+                    if trip_type:
+                        plt.plot([trip_time[idx], trip_time[idx + 1]], dis_list,
+                                 color=lane_colors[lane_index], lw=1, linestyle="-")
+                    else:
+                        plt.plot([trip_time[idx], trip_time[idx + 1]], dis_list,
+                                 color=lane_colors[lane_index], lw=1.5, linestyle=":")
+
+            # plot the signal timing plan
+            edge_list = link.edge_list
+            # enter_list
+            signal_edge = edge_list[-1]
+            edge = self.edges[signal_edge]
+            lane_list = edge.lanes_list
+            for lane_id in lane_list:
+                lane = self.lanes[lane_id]
+                if lane.controlled_movement is not None:
+                    [signal_id, movement_id] = lane.controlled_movement
+                    movement = self.signals[signal_id].movements[movement_id]
+                    signal_state_list = movement.state_list
+
+                    for idx in range(len(signal_state_list)):
+                        signal_state = signal_state_list[idx]
+                        x_list = [idx - 0.5, idx + 0.5]
+                        y_list = [link.length + 5 + 4 * int(lane.lane_id[-1])] * 2
+                        if signal_state >= 1:
+                            plt.plot(x_list, y_list, "g", lw=1.8)
+                        else:
+                            plt.plot(x_list, y_list, "r", lw=1.8)
+
+            # plot the edge segments
+            start_dis = 0
+            for edge_id in edge_list:
+                edge = self.edges[edge_id]
+
+                plt.plot([0, self.terminate_steps], [start_dis, start_dis], "k--", lw=1, alpha=0.5)
+                start_dis += edge.length
+
+            plt.xlabel("Time (s)")
+            plt.ylabel("Distance (m)")
+            plt.xlim([0, self.terminate_steps])
+            plt.ylim([0, link.length + 20])
+            plt.show()
 
     def _output_corridor_time_space_diagram(self, link_list, file_name, signals):
         start_dis = 0
@@ -253,12 +323,44 @@ class SignalizedNetwork(gym.Env, ABC):
         for link_id in link_list:
             link = self.links[link_id]
             link_length = link.length
+            enter_edge = link.edge_list[-1]
+            edge = self.edges[enter_edge]
+
+            signal_state_list = None
+            # plot the signal state
+            lane_list = edge.lanes_list
+            for lane_id in lane_list:
+                lane = self.lanes[lane_id]
+                if lane.controlled_movement is not None:
+                    [signal_id, movement_id] = lane.controlled_movement
+                    movement = self.signals[signal_id].movements[movement_id]
+
+                    direction = movement.direction
+                    if direction is "s":
+                        signal_state_list = movement.state_list
+
+            if signal_state_list is not None:
+                for idx in range(len(signal_state_list)):
+                    signal_state = signal_state_list[idx]
+                    x_list = [idx, idx + 1]
+                    y_list = [start_dis + link.length] * 2
+                    if signal_state >= 1:
+                        plt.plot(x_list, y_list, "g", lw=1.8)
+                    else:
+                        plt.plot(x_list, y_list, "r", lw=1.8)
+
+            straight_lane_list = []
 
             trajectories = link.trajectories
             for trip_id in trajectories.keys():
                 trip_time = trajectories[trip_id]["time"]
                 trip_dis = trajectories[trip_id]["distance"]
                 trip_type = trajectories[trip_id]["type"]
+                lane_idx = trajectories[trip_id]["lane"][-1]
+                if len(straight_lane_list) > 0:
+                    if not (lane_idx in straight_lane_list):
+                        continue
+
                 trip_dis = [val + start_dis for val in trip_dis]
 
                 if not trip_type:
@@ -593,8 +695,9 @@ class SignalizedNetwork(gym.Env, ABC):
                 else:
                     binary_state = 0
                 binary_state_list.append(binary_state)
-                movement_id = list(self.signals[signal_id].movements)[state_idx]
-                self.signals[signal_id].movements[movement_id].state_list.append(binary_state)
+                # movement_id = list(self.signals[signal_id].movements)[state_idx]
+
+                self.signals[signal_id].movements[state_idx].state_list.append(binary_state)
             self.signals[signal_id].observed_state = binary_state_list
 
         # load useful information from simulation
@@ -948,7 +1051,7 @@ class SignalizedNetwork(gym.Env, ABC):
 
         # generate the link and movement for the network
         # currently ignore the "dummy" link
-        self._generate_link_movement()
+        self._generate_link_movement(debug=False)
 
         # load turning ratio
         self._load_movement_turning_ratio()
@@ -1146,20 +1249,21 @@ class SignalizedNetwork(gym.Env, ABC):
             for movement_id in movements.keys():
                 movement = Movement(signal_id + "_" + str(movement_id))
                 enter_lane = movements[movement_id]["upstream_lane"]
+                self.lanes[enter_lane].controlled_movement = [signal_id, movement_id]
                 exit_lane = movements[movement_id]["downstream_lane"]
                 direction = movements[movement_id]["dir"]
                 enter_edge = self.lanes[enter_lane].edge_id
+
                 exit_edge = self.lanes[exit_lane].edge_id
+
                 movement.enter_lane = enter_lane
                 movement.exit_lane = exit_lane
                 movement.direction = direction
 
                 for link_id in self.links.keys():
                     edge_list = self.links[link_id].edge_list
-
                     if enter_edge in edge_list:
                         movement.enter_link = link_id
-
                     if exit_edge in edge_list:
                         movement.exit_link = link_id
 
@@ -1184,8 +1288,10 @@ class SignalizedNetwork(gym.Env, ABC):
             for link_id in self.links.keys():
                 link = self.links[link_id]
                 link_shape = link.shape
-
+                edge_start = link.edge_list[0]
+                edge = self.edges[edge_start]
                 plt.plot(link_shape[0], link_shape[1], "r-", lw=1)
+                plt.plot(edge.shape[0], edge.shape[1], "m-", lw=1)
 
             for edge_id in self.edges.keys():
                 edge = self.edges[edge_id]
@@ -1224,6 +1330,19 @@ class Edge(object):
                  downstream_junction=None, lanes_list=None,
                  upstream_edges=None, downstream_edges=None,
                  shape=None, length=None):
+        """
+
+        :param edge_id:
+        :param category:
+        :param upstream_junction:
+        :param link_id:
+        :param downstream_junction:
+        :param lanes_list:
+        :param upstream_edges:
+        :param downstream_edges:
+        :param shape:
+        :param length:
+        """
         self.link_id = link_id
         self.edge_id = edge_id
         self.length = length
@@ -1251,7 +1370,7 @@ class Edge(object):
 class Lane(object):
     def __init__(self, lane_id, edge_id, speed=None, length=None,
                  shape=None, downstream_junction=None, upstream_junction=None,
-                 upstream_lanes=None, downstream_lanes=None):
+                 upstream_lanes=None, downstream_lanes=None, controlled_movement=None):
         self.lane_id = lane_id
         self.edge_id = edge_id
         self.speed = speed
@@ -1259,6 +1378,7 @@ class Lane(object):
         self.shape = shape
         self.downstream_junction = downstream_junction
         self.upstream_junction = upstream_junction
+        self.controlled_movement = controlled_movement
         if upstream_lanes is None:
             self.upstream_lanes = {}
         else:
@@ -1361,7 +1481,8 @@ class Link(object):
     def __init__(self, link_id=None, edge_list=None, length=None, maximum_lane_number=None,
                  minimum_lane_number=None, cell_number=None,
                  upstream_intersection=None, downstream_intersection=None,
-                 shape=None, trajectories=None, current_density=None, stopped_density=None):
+                 shape=None, trajectories=None, current_density=None, stopped_density=None,
+                 segments=None):
         """
         a link is defined as the whole road segment connects two intersections or ingress/exit node
         :param link_id:
@@ -1375,6 +1496,7 @@ class Link(object):
         :param shape:
         :param trajectories:
         :param current_density:
+        :param segments: [[0, 100, 500,...], [3, 2, 3,...]] ([[segment_start_dis,...], [lane_numbers,...]])
         """
         self.maximum_lane_number = maximum_lane_number
         self.minimum_lane_number = minimum_lane_number
@@ -1394,6 +1516,7 @@ class Link(object):
             self.edge_list = []
         else:
             self.edge_list = edge_list
+        self.segments = segments
 
 
 class Movement(object):
