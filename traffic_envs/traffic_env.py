@@ -336,7 +336,7 @@ class SignalizedNetwork(gym.Env, ABC):
                     movement = self.signals[signal_id].movements[movement_id]
 
                     direction = movement.direction
-                    if direction is "s":
+                    if direction == "s":
                         signal_state_list = movement.state_list
 
             if signal_state_list is not None:
@@ -686,7 +686,10 @@ class SignalizedNetwork(gym.Env, ABC):
         # load signal state
         signal_list = self.observation_mapping_details["signals"]
         for signal_id in signal_list:
-            local_state = traci.trafficlight_getRedYellowGreenState(signal_id)
+            if config.GUI_MODE:
+                local_state = traci.trafficlight.getRedYellowGreenState(signal_id)
+            else:
+                local_state = traci.trafficlight_getRedYellowGreenState(signal_id)
             binary_state_list = []
             for state_idx in range(len(local_state)):
                 single_state = local_state[state_idx]
@@ -740,17 +743,16 @@ class SignalizedNetwork(gym.Env, ABC):
                 else:
                     self._connected_vehicle_list.append(vehicle_id)
 
-            # # the following code is to dump the data to vehicle class
-            # if self.penetration_rate is not None:
-            #     if not (vehicle_id in self.vehicles.keys()):
-            #         self.vehicles[vehicle_id] = Vehicle(vehicle_id)
-            #     self.vehicles[vehicle_id].speed_list.append(vehicle_speed)
-            #     self.vehicles[vehicle_id].lane_list.append(vehicle_lane)
-            #     self.vehicles[vehicle_id].waiting_time_list.append(waiting_time)
-            #     self.vehicles[vehicle_id].link_list.append(vehicle_link)
-            #     self.vehicles[vehicle_id].edge_list.append(vehicle_edge)
-            #     self.vehicles[vehicle_id].lane_pos_list.append(edge_pos)
-            #     self.vehicles[vehicle_id].link_pos_list.append(link_pos)
+            # the following code is to dump the data to vehicle class
+            if not (vehicle_id in self.vehicles.keys()):
+                self.vehicles[vehicle_id] = Vehicle(vehicle_id)
+            self.vehicles[vehicle_id].speed_list.append(vehicle_speed)
+            self.vehicles[vehicle_id].lane_list.append(vehicle_lane)
+            self.vehicles[vehicle_id].link_list.append(vehicle_link)
+            self.vehicles[vehicle_id].link_pos_list.append(link_pos)
+            # self.vehicles[vehicle_id].edge_list.append(vehicle_edge)
+            # self.vehicles[vehicle_id].lane_pos_list.append(edge_pos)
+            # self.vehicles[vehicle_id].waiting_time_list.append(waiting_time)
             if vehicle_link is None:
                 continue
 
@@ -1053,6 +1055,11 @@ class SignalizedNetwork(gym.Env, ABC):
         # currently ignore the "dummy" link
         self._generate_link_movement(debug=False)
 
+        self._generate_link_segment_and_pipeline(debug=False)
+
+        # update the shape and length of the link from the edges
+        self._update_link_shape_from_edges()
+
         # load turning ratio
         self._load_movement_turning_ratio()
 
@@ -1115,6 +1122,7 @@ class SignalizedNetwork(gym.Env, ABC):
         """
         for link_id in self.links.keys():
             link = self.links[link_id]
+
             link_shape = [[], []]
             link_length = 0
             maximum_lanes = 0
@@ -1238,9 +1246,6 @@ class SignalizedNetwork(gym.Env, ABC):
                 link.downstream_junction = signal_id
                 self._add_link(link)
 
-        # update the shape and length of the link from the edges
-        self._update_link_shape_from_edges()
-
         # generate the movement for signal id
         for signal_id in self.signals.keys():
             signal = self.signals[signal_id]
@@ -1304,6 +1309,108 @@ class SignalizedNetwork(gym.Env, ABC):
             plt.plot(signalized_intersection[0], signalized_intersection[1], "r*", label="signals")
             plt.legend()
             plt.show()
+
+    def _generate_link_segment_and_pipeline(self, debug=False):
+        for link_id in self.links.keys():
+            link = self.links[link_id]
+            edge_list = link.edge_list
+
+            segment_edge_list = [[edge_list[0]]]
+            pipeline_lane_list = [[val] for val in self.edges[edge_list[0]].lanes_list]
+            segment_cursor = 0
+            for idx in range(len(edge_list) - 1):
+                local_edge_id = edge_list[idx]
+                local_edge = self.edges[local_edge_id]
+                next_edge_id = edge_list[idx + 1]
+                next_edge = self.edges[next_edge_id]
+
+                local_lanes = local_edge.lanes_list
+                next_lanes = next_edge.lanes_list
+                # print("\nlocal and next lanes:", local_lanes, next_lanes)
+
+                if len(local_lanes) == len(next_lanes):
+                    segment_edge_list[segment_cursor].append(next_edge_id)
+                    for ipx in range(len(pipeline_lane_list)):
+                        lane_id = pipeline_lane_list[ipx][-1][-1]
+                        for next_lane in next_lanes:
+                            if next_lane[-1] == lane_id:
+                                pipeline_lane_list[ipx].append(next_lane)
+                elif len(local_lanes) > len(next_lanes):
+                    print("some lane end...")
+                else:
+                    offset = self._get_edge_connection_offset(local_edge_id, next_edge_id)
+                    segment_edge_list.append([next_edge_id])
+                    segment_cursor += 1
+
+                    matched_downstream_lanes = []
+                    for ipx in range(len(pipeline_lane_list)):
+                        lane_id = int(pipeline_lane_list[ipx][-1][-1])
+                        for next_lane in next_lanes:
+                            if int(next_lane[-1]) - offset == lane_id:
+                                pipeline_lane_list[ipx].append(next_lane)
+                                matched_downstream_lanes.append(next_lane)
+                                break
+                    for next_lane in next_lanes:
+                        if not (next_lane in matched_downstream_lanes):
+                            pipeline_lane_list.append([next_lane])
+                self.links[link_id].pipelines = pipeline_lane_list
+                self.links[link_id].segments = segment_edge_list
+
+            if debug:
+                plt.figure(figsize=[10, 5])
+                plt.subplot(121)
+                for edge_id in edge_list:
+                    edge = self.edges[edge_id]
+                    for lane_id in edge.lanes_list:
+                        plt.plot(self.lanes[lane_id].shape[0], self.lanes[lane_id].shape[1], "k.-", lw=1)
+                for pipeline_lane in pipeline_lane_list:
+                    x_shape = []
+                    y_shape = []
+                    for lane_id in pipeline_lane:
+                        lane = self.lanes[lane_id]
+                        x_shape += lane.shape[0]
+                        y_shape += lane.shape[1]
+                    plt.plot(x_shape, y_shape, ".-")
+                plt.subplot(122)
+                for segment in segment_edge_list:
+                    x_shape = []
+                    y_shape = []
+                    for edge_id in segment:
+                        x_shape += self.edges[edge_id].shape[0]
+                        y_shape += self.edges[edge_id].shape[1]
+                    plt.plot(x_shape, y_shape, ".--")
+                plt.show()
+                plt.close()
+
+    def _get_edge_connection_offset(self, upstream_edge_id, downstream_edge_id):
+        """
+        for those edges extend to more lanes, find the offset
+        :param upstream_edge_id:
+        :param downstream_edge_id:
+        :return:
+        """
+        upstream_lanes = self.edges[upstream_edge_id].lanes_list
+        downstream_lanes = self.edges[downstream_edge_id].lanes_list
+
+        upper_limit = len(downstream_lanes) - len(upstream_lanes)
+        total_distance_list = []
+        for idx in range(upper_limit + 1):
+            actuate_downstream_lanes = downstream_lanes[idx: idx + len(upstream_lanes)]
+
+            total_distance = 0
+            for jdx in range(len(upstream_lanes)):
+                [x1, x2] = self.lanes[upstream_lanes[jdx]].shape[0][-2:]
+                [y1, y2] = self.lanes[upstream_lanes[jdx]].shape[1][-2:]
+                x0 = self.lanes[actuate_downstream_lanes[jdx]].shape[0][0]
+                y0 = self.lanes[actuate_downstream_lanes[jdx]].shape[1][0]
+                local_dis = abs((y2 - y1) * x0 - (x2 - x1) * y0 + x2 * y1 - y2 * x1)
+                local_dis = local_dis / np.sqrt(np.square(y2 - y1) + np.square(x2 - x1))
+
+                local_dis += np.sqrt(np.square(x2 - x0) + np.square(y2 - y0)) * 3
+                total_distance += local_dis
+            total_distance_list.append(total_distance)
+        offset = np.argmin(total_distance_list)
+        return offset
 
 
 class Junction(object):
@@ -1390,24 +1497,42 @@ class Lane(object):
 
 
 class Vehicle(object):
-    def __init__(self, vehicle_id, speed_list=None, lane_list=None, edge_list=None, lane_pos_list=None,
-                 link_list=None, link_pos_list=None, waiting_time_list=None):
+    def __init__(self, vehicle_id, speed_list=None, lane_list=None,
+                 link_list=None, link_pos_list=None, leading_vehicle_list=None, leading_vehicle=None,
+                 following_vehicle=None, lane_changing=False, leading_dis=None, following_dis=None,
+                 following_vehicle_list=None, cv_type=False):
         """
-        note: this class is not used yet
+
         :param vehicle_id:
         :param speed_list:
         :param lane_list:
-        :param edge_list:
-        :param lane_pos_list:
         :param link_list:
         :param link_pos_list:
-        :param waiting_time_list:
+        :param leading_vehicle_list:
+        :param leading_vehicle:
+        :param following_vehicle:
+        :param lane_changing:
+        :param leading_dis:
+        :param following_dis:
+        :param following_vehicle_list:
         """
-        self.vehicle_id = vehicle_id
-        if waiting_time_list is None:
-            self.waiting_time_list = []
+        self.leading_dis = leading_dis
+        self.following_dis = following_dis
+        self.leading_vehicle = leading_vehicle
+        self.following_vehicle = following_vehicle
+        self.lane_changing = lane_changing
+        self.cv_type = cv_type
+        if following_vehicle_list is None:
+            self.following_vehicle_list = []
         else:
-            self.waiting_time_list = waiting_time_list
+            self.following_vehicle_list = following_vehicle_list
+
+        if leading_vehicle_list is None:
+            self.leading_vehicle_list = []
+        else:
+            self.leading_vehicle_list = leading_vehicle_list
+
+        self.vehicle_id = vehicle_id
         if speed_list is None:
             self.speed_list = []
         else:
@@ -1416,14 +1541,6 @@ class Vehicle(object):
             self.lane_list = []
         else:
             self.lane_list = lane_list
-        if edge_list is None:
-            self.edge_list = []
-        else:
-            self.edge_list = edge_list
-        if lane_pos_list is None:
-            self.lane_pos_list = []
-        else:
-            self.lane_pos_list = lane_pos_list
         if link_list is None:
             self.link_list = []
         else:
@@ -1482,7 +1599,7 @@ class Link(object):
                  minimum_lane_number=None, cell_number=None,
                  upstream_intersection=None, downstream_intersection=None,
                  shape=None, trajectories=None, current_density=None, stopped_density=None,
-                 segments=None):
+                 segments=None, current_vehicles=None, pipelines=None):
         """
         a link is defined as the whole road segment connects two intersections or ingress/exit node
         :param link_id:
@@ -1496,7 +1613,9 @@ class Link(object):
         :param shape:
         :param trajectories:
         :param current_density:
-        :param segments: [[0, 100, 500,...], [3, 2, 3,...]] ([[segment_start_dis,...], [lane_numbers,...]])
+        :param segments: [[edge_id_list], [],...]
+        :param current_vehicles:
+        :param pipelines: [[edge_id_list], [], [], ...]
         """
         self.maximum_lane_number = maximum_lane_number
         self.minimum_lane_number = minimum_lane_number
@@ -1517,6 +1636,11 @@ class Link(object):
         else:
             self.edge_list = edge_list
         self.segments = segments
+        self.pipelines = pipelines
+        if current_vehicles is None:
+            self.vehicles = []
+        else:
+            self.vehicles = current_vehicles
 
 
 class Movement(object):
