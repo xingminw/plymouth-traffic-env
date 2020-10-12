@@ -11,6 +11,7 @@ from gym import spaces
 from glob import glob
 from copy import deepcopy
 from random import random
+from scipy.stats import binom
 from traffic_envs.utils import\
     generate_new_route_configuration, delete_buffer_file
 
@@ -38,7 +39,7 @@ class SignalizedNetwork(gym.Env, ABC):
                  cost=0, delay_list=None, long_waiting_penalty=0.3, _use_random_seed=True,
                  _is_open=False, observation_space=None, action_space=None, observation_mapping_details=None,
                  save_trajs=False, observation=None, output_cost=False, sumo_seed=None, long_waiting_clip=5,
-                 actuate_control=False, relative_demand=1):
+                 actuate_control=False, relative_demand=1, observed_cost=0):
         """
 
         :param terminate_steps: total time slots to terminate the simulation
@@ -68,7 +69,7 @@ class SignalizedNetwork(gym.Env, ABC):
         :param relative_demand:
         """
         # simulation parameters
-        self.penetration_rate = 0.15                        # set to be None to disable the CV environment
+        self.penetration_rate = 1                           # set to be None to disable the CV environment
         self.output_cost = output_cost                      # true to output the cost curve
         self.terminate_steps = terminate_steps              # total simulation steps
         self.actuate_control = actuate_control              # set True to apply actuate control
@@ -97,8 +98,6 @@ class SignalizedNetwork(gym.Env, ABC):
         self._is_open = _is_open
 
         self._long_waiting_clip = long_waiting_clip
-        self._connected_vehicle_list = []
-        self._ordinary_vehicle_list = []
 
         # buffer data of the traffic state
         # this buffer data must be reset when the simulation is reset
@@ -108,6 +107,7 @@ class SignalizedNetwork(gym.Env, ABC):
         else:
             self.cost_list = cost_list
         self.cost = cost
+        self.observed_cost = observed_cost
         if delay_list is None:
             self.delay_list = []
         else:
@@ -424,7 +424,6 @@ class SignalizedNetwork(gym.Env, ABC):
         return random_seed
 
     def _close_simulator(self):
-
         if self._is_open:
             # close simulation
             traci.close()
@@ -462,10 +461,6 @@ class SignalizedNetwork(gym.Env, ABC):
             movements = signal.movements
             for movement_id in movements.keys():
                 self.signals[signal_id].movements[movement_id].state_list = []
-
-        # clear the vehicle ids
-        self._connected_vehicle_list = []
-        self._ordinary_vehicle_list = []
 
     def _generate_observation(self):
         link_list = [val[0] for val in self.observation_mapping_details["links"]]
@@ -715,7 +710,7 @@ class SignalizedNetwork(gym.Env, ABC):
 
         vehicle_list = traci.vehicle.getIDList()
 
-        # load trajectory to network
+        # get the link vehicle dict (including cv and non-cv)
         link_vehicle_dict = {}
 
         for vehicle_id in vehicle_list:
@@ -735,50 +730,60 @@ class SignalizedNetwork(gym.Env, ABC):
             if link_pos is not None:
                 link_pos += edge_pos
 
-            # label the vehicle as CV or ordinary vehicle
-            all_vehicles_id = self._ordinary_vehicle_list + self._ordinary_vehicle_list
-            if not (vehicle_id in all_vehicles_id):
-                if random() > self.penetration_rate:
-                    self._ordinary_vehicle_list.append(vehicle_id)
-                else:
-                    self._connected_vehicle_list.append(vehicle_id)
-
             # the following code is to dump the data to vehicle class
             if not (vehicle_id in self.vehicles.keys()):
                 self.vehicles[vehicle_id] = Vehicle(vehicle_id)
+                if random() > self.penetration_rate:
+                    self.vehicles[vehicle_id].cv_type = False
+                else:
+                    self.vehicles[vehicle_id].cv_type = True
+
             self.vehicles[vehicle_id].speed_list.append(vehicle_speed)
             self.vehicles[vehicle_id].lane_list.append(vehicle_lane)
             self.vehicles[vehicle_id].link_list.append(vehicle_link)
             self.vehicles[vehicle_id].link_pos_list.append(link_pos)
-            # self.vehicles[vehicle_id].edge_list.append(vehicle_edge)
-            # self.vehicles[vehicle_id].lane_pos_list.append(edge_pos)
-            # self.vehicles[vehicle_id].waiting_time_list.append(waiting_time)
             if vehicle_link is None:
                 continue
 
             if not (vehicle_link in link_vehicle_dict.keys()):
-                link_vehicle_dict[vehicle_link] = {"pos": [], "lane": [], "speed": [], "delay": 0, "cost": 0}
+                link_vehicle_dict[vehicle_link] = {"pos": [], "lane": [], "speed": [],
+                                                   "delay": 0, "cost": 0, "observed_cost": 0,
+                                                   "cv_type": [], "vehicles": []}
+
+            link_vehicle_dict[vehicle_link]["vehicles"].append(vehicle_id)
             link_vehicle_dict[vehicle_link]["pos"].append(link_pos)
             link_vehicle_dict[vehicle_link]["speed"].append(vehicle_speed)
             link_vehicle_dict[vehicle_link]["lane"].append(int(vehicle_lane[-1]))
+            cv_type = self.vehicles[vehicle_id].cv_type
+            link_vehicle_dict[vehicle_link]["cv_type"].append(cv_type)
+
             local_delay = waiting_time > 0
             link_vehicle_dict[vehicle_link]["delay"] += local_delay
 
             # penalize the long continuous waiting time...
             link_vehicle_dict[vehicle_link]["cost"] +=\
                 local_delay * np.clip(pow(waiting_time, self._long_waiting_penalty), 1, self._long_waiting_clip)
+            if cv_type:
+                link_vehicle_dict[vehicle_link]["observed_cost"] += \
+                    local_delay * np.clip(pow(waiting_time, self._long_waiting_penalty), 1, self._long_waiting_clip)
 
             if self.penetration_rate is not None:
                 if not (vehicle_id in self.links[vehicle_link].trajectories.keys()):
                     self.links[vehicle_link].trajectories[vehicle_id] =\
                         {"time": [], "speed": [], "distance": [], "lane": [],
-                         "type": vehicle_id in self._connected_vehicle_list}
+                         "type": self.vehicles[vehicle_id].cv_type}
                 self.links[vehicle_link].trajectories[vehicle_id]["time"].append(time_step)
                 self.links[vehicle_link].trajectories[vehicle_id]["speed"].append(vehicle_speed)
                 self.links[vehicle_link].trajectories[vehicle_id]["distance"].append(link_pos)
                 self.links[vehicle_link].trajectories[vehicle_id]["lane"].append(int(vehicle_lane[-1]))
+
+        # sort the vehicle within the link and get their leading following relationship (pipeline)
+        self._sort_vehicle_within_link(link_vehicle_dict)
+
         system_delay = current_blocked_num
         system_cost = self._long_waiting_clip * current_blocked_num
+        # sample the observed cost
+        observed_cost = self._long_waiting_clip * binom.rvs(int(current_blocked_num), self.penetration_rate, size=1)[0]
 
         # initiate and clean the link density
         for link_id in self.links.keys():
@@ -788,7 +793,10 @@ class SignalizedNetwork(gym.Env, ABC):
             density_matrix = np.zeros((cell_number, lane_number))
             self.links[link_id].current_density = density_matrix
             self.links[link_id].stopped_density = deepcopy(density_matrix)
+            self.links[link_id].observed_density = deepcopy(density_matrix)
+            self.links[link_id].observed_stopped = deepcopy(density_matrix)
 
+        # dump the link vehicle to the Euler coordinates
         for link_id in link_vehicle_dict.keys():
             link = self.links[link_id]
             link_length = link.length
@@ -796,31 +804,150 @@ class SignalizedNetwork(gym.Env, ABC):
             cell_number = link.cell_number
 
             pos_list = link_vehicle_dict[link_id]["pos"]
+            cv_type_list = link_vehicle_dict[link_id]["cv_type"]
             lane_list = link_vehicle_dict[link_id]["lane"]
             speed_list = link_vehicle_dict[link_id]["speed"]
             density_matrix = link.current_density
             stopped_density = link.stopped_density
+            observed_density = link.observed_density
+            observed_stopped = link.observed_stopped
 
             for idx in range(len(pos_list)):
                 current_pos = pos_list[idx]
+                cv_type = cv_type_list[idx]
                 distance_to_stopbar = link_length - current_pos
                 current_lane = lane_list[idx]
                 stop_flag = int(speed_list[idx] < 2)
 
                 local_cell_index = cell_number - int(distance_to_stopbar / resolution) - 1
+
                 density_matrix[local_cell_index, current_lane] += 1
-                stopped_density[local_cell_index, current_lane] += stop_flag
+                observed_density[local_cell_index, current_lane] += 1
+
+                if cv_type:
+                    stopped_density[local_cell_index, current_lane] += stop_flag
+                    observed_stopped[local_cell_index, current_lane] += stop_flag
             self.links[link_id].current_density = density_matrix
             self.links[link_id].current_density = stopped_density
+            self.links[link_id].observed_stopped = observed_stopped
+            self.links[link_id].observed_density = observed_density
             self.links[link_id].current_vehs = np.sum(density_matrix)
 
             system_cost += link_vehicle_dict[link_id]["cost"]
+            observed_cost += link_vehicle_dict[link_id]["observed_cost"]
             system_delay += link_vehicle_dict[link_id]["delay"]
 
         self.delay_list.append(system_delay)
         self.cost_list.append(system_cost)
         self.cost = system_cost
+        self.observed_cost = observed_cost
         self._generate_observation()
+
+    def _sort_vehicle_within_link(self, link_vehicle_dict):
+        for link_id in self.links.keys():
+            link = self.links[link_id]
+
+            # get the pipelines and segments of the link
+            pipelines = link.pipelines
+            segments = link.segments
+
+            if not (link_id in link_vehicle_dict.keys()):
+                continue
+            vehicle_list = link_vehicle_dict[link_id]["vehicles"]
+
+            pipeline_vehicle_dict = {}
+            for vehicle_id in vehicle_list:
+                vehicle = self.vehicles[vehicle_id]
+                vehicle_lane = vehicle.lane_list[-1]
+                vehicle_edge = self.lanes[vehicle_lane].edge_id
+                vehicle_pos = vehicle.link_pos_list[-1]
+
+                # get the segment
+                segment_assigned = False
+                for segment_id in segments.keys():
+                    segment_edges = segments[segment_id]
+                    if vehicle_edge in segment_edges:
+                        self.vehicles[vehicle_id].segment_list.append(segment_id)
+                        segment_assigned = True
+                        break
+                if not segment_assigned:
+                    exit("segment not assigned!")
+
+                # get the pipeline id
+                pipeline_assigned = False
+                for pipeline_id in pipelines:
+                    pipeline_lanes = pipelines[pipeline_id]
+                    if vehicle_lane in pipeline_lanes:
+                        self.vehicles[vehicle_id].pipeline_list.append(pipeline_id)
+                        pipeline_assigned = True
+
+                        if not (pipeline_id in pipeline_vehicle_dict.keys()):
+                            pipeline_vehicle_dict[pipeline_id] = {"vehicles": [], "dis": []}
+                        pipeline_vehicle_dict[pipeline_id]["vehicles"].append(vehicle_id)
+                        pipeline_vehicle_dict[pipeline_id]["dis"].append(vehicle_pos)
+                if not pipeline_assigned:
+                    exit("pipeline not assigned!")
+
+            # sort the vehicle within different pipelines
+            for pipeline_id in pipeline_vehicle_dict.keys():
+                distance_list = pipeline_vehicle_dict[pipeline_id]["dis"]
+                vehicle_id_list = pipeline_vehicle_dict[pipeline_id]["vehicles"]
+                sequence = np.argsort(distance_list)
+                new_vehicle_list = []
+                new_distance_list = []
+                for sdx in sequence:
+                    new_vehicle_list.append(vehicle_id_list[sdx])
+                    new_distance_list.append(distance_list[sdx])
+
+                new_distance_list = [0] + new_distance_list + [link.length]
+                new_vehicle_list = [None] + new_vehicle_list + [None]
+                for vdx in range(len(new_vehicle_list) - 2):
+                    following_vehicle = new_vehicle_list[vdx]
+                    current_vehicle = new_vehicle_list[vdx + 1]
+                    leading_vehicle = new_vehicle_list[vdx + 2]
+                    leading_dis = new_distance_list[vdx + 2] - new_distance_list[vdx + 1]
+                    following_dis = new_distance_list[vdx + 1] - new_distance_list[vdx]
+                    self.vehicles[current_vehicle].leading_dis_list.append(leading_dis)
+                    self.vehicles[current_vehicle].leading_vehicle_list.append(leading_vehicle)
+                    self.vehicles[current_vehicle].following_dis_list.append(following_dis)
+                    self.vehicles[current_vehicle].following_vehicle_list.append(following_vehicle)
+
+            # find the leading cv and following cv
+            for vehicle_id in vehicle_list:
+                vehicle = self.vehicles[vehicle_id]
+                time_out_max = 1000                  # set a time out threshold,
+                # forward search
+                vehicle_cursor = deepcopy(vehicle)
+                count = 0
+                while True:
+                    count += 1
+                    if count > time_out_max:
+                        exit("Time out error for finding the forward cv")
+                    leading_vehicle = vehicle_cursor.leading_vehicle_list[-1]
+                    if leading_vehicle is None:
+                        self.vehicles[vehicle_id].leading_cv_list.append(leading_vehicle)
+                        break
+                    leading_type = self.vehicles[leading_vehicle].cv_type
+                    if leading_type:
+                        self.vehicles[vehicle_id].leading_cv_list.append(leading_vehicle)
+                        break
+                    vehicle_cursor = deepcopy(self.vehicles[leading_vehicle])
+
+                vehicle_cursor = deepcopy(vehicle)
+                count = 0
+                while True:
+                    count += 1
+                    if count > time_out_max:
+                        exit("Time out error for finding the backward cv")
+                    following_vehicle = vehicle_cursor.following_vehicle_list[-1]
+                    if following_vehicle is None:
+                        self.vehicles[vehicle_id].following_cv_list.append(following_vehicle)
+                        break
+                    following_type = self.vehicles[following_vehicle].cv_type
+                    if following_type:
+                        self.vehicles[vehicle_id].following_cv_list.append(following_vehicle)
+                        break
+                    vehicle_cursor = deepcopy(self.vehicles[following_vehicle])
 
     def _add_signal(self, signal):
         if self.signals is None:
@@ -1353,9 +1480,8 @@ class SignalizedNetwork(gym.Env, ABC):
                     for next_lane in next_lanes:
                         if not (next_lane in matched_downstream_lanes):
                             pipeline_lane_list.append([next_lane])
-                self.links[link_id].pipelines = pipeline_lane_list
-                self.links[link_id].segments = segment_edge_list
 
+            # plot the debug figure for the pipeline and segment separation
             if debug:
                 plt.figure(figsize=[10, 5])
                 plt.subplot(121)
@@ -1381,6 +1507,17 @@ class SignalizedNetwork(gym.Env, ABC):
                     plt.plot(x_shape, y_shape, ".--")
                 plt.show()
                 plt.close()
+
+            # convert pipeline and segment to dict
+            pipeline_dict = {}
+            for idx in range(len(pipeline_lane_list)):
+                pipeline_dict[idx] = pipeline_lane_list[idx]
+            self.links[link_id].pipelines = pipeline_dict
+
+            segment_dict = {}
+            for idx in range(len(segment_edge_list)):
+                segment_dict[idx] = segment_edge_list[idx]
+            self.links[link_id].segments = segment_dict
 
     def _get_edge_connection_offset(self, upstream_edge_id, downstream_edge_id):
         """
@@ -1498,9 +1635,11 @@ class Lane(object):
 
 class Vehicle(object):
     def __init__(self, vehicle_id, speed_list=None, lane_list=None,
-                 link_list=None, link_pos_list=None, leading_vehicle_list=None, leading_vehicle=None,
-                 following_vehicle=None, lane_changing=False, leading_dis=None, following_dis=None,
-                 following_vehicle_list=None, cv_type=False):
+                 link_list=None, link_pos_list=None, leading_vehicle_list=None,
+                 lane_changing_list=None, leading_dis_list=None, following_dis_list=None,
+                 following_vehicle_list=None, cv_type=False,
+                 leading_cv_list=None, following_cv_list=None, segment_list=None,
+                 pipeline_list=None):
         """
 
         :param vehicle_id:
@@ -1509,30 +1648,55 @@ class Vehicle(object):
         :param link_list:
         :param link_pos_list:
         :param leading_vehicle_list:
-        :param leading_vehicle:
-        :param following_vehicle:
-        :param lane_changing:
-        :param leading_dis:
-        :param following_dis:
+        :param lane_changing_list:
+        :param leading_dis_list:
+        :param following_dis_list:
         :param following_vehicle_list:
+        :param cv_type:
+        :param leading_cv_list:
+        :param following_cv_list:
+        :param segment_list:
+        :param pipeline_list
         """
-        self.leading_dis = leading_dis
-        self.following_dis = following_dis
-        self.leading_vehicle = leading_vehicle
-        self.following_vehicle = following_vehicle
-        self.lane_changing = lane_changing
+        self.vehicle_id = vehicle_id
         self.cv_type = cv_type
+
+        if segment_list is None:
+            self.segment_list = []
+        else:
+            self.segment_list = segment_list
+        if pipeline_list is None:
+            self.pipeline_list = []
+        else:
+            self.pipeline_list = pipeline_list
+        if leading_dis_list is None:
+            self.leading_dis_list = []
+        else:
+            self.leading_dis_list = leading_dis_list
+        if following_dis_list is None:
+            self.following_dis_list = []
+        else:
+            self.following_dis_list = following_dis_list
+        if lane_changing_list is None:
+            self.lane_changing_list = []
+        else:
+            self.lane_changing_list = lane_changing_list
+        if leading_cv_list is None:
+            self.leading_cv_list = []
+        else:
+            self.leading_cv_list = leading_cv_list
+        if following_cv_list is None:
+            self.following_cv_list = []
+        else:
+            self.following_cv_list = following_cv_list
         if following_vehicle_list is None:
             self.following_vehicle_list = []
         else:
             self.following_vehicle_list = following_vehicle_list
-
         if leading_vehicle_list is None:
             self.leading_vehicle_list = []
         else:
             self.leading_vehicle_list = leading_vehicle_list
-
-        self.vehicle_id = vehicle_id
         if speed_list is None:
             self.speed_list = []
         else:
@@ -1599,7 +1763,8 @@ class Link(object):
                  minimum_lane_number=None, cell_number=None,
                  upstream_intersection=None, downstream_intersection=None,
                  shape=None, trajectories=None, current_density=None, stopped_density=None,
-                 segments=None, current_vehicles=None, pipelines=None):
+                 segments=None, current_vehicles=None, pipelines=None, observed_density=None,
+                 observed_stopped=None):
         """
         a link is defined as the whole road segment connects two intersections or ingress/exit node
         :param link_id:
@@ -1616,6 +1781,8 @@ class Link(object):
         :param segments: [[edge_id_list], [],...]
         :param current_vehicles:
         :param pipelines: [[edge_id_list], [], [], ...]
+        :param observed_stopped: observed stop density matrix
+        :param observed_density: observed density matrix
         """
         self.maximum_lane_number = maximum_lane_number
         self.minimum_lane_number = minimum_lane_number
@@ -1627,6 +1794,8 @@ class Link(object):
         self.length = length
         self.current_density = current_density
         self.stopped_density = stopped_density
+        self.observed_density = observed_density
+        self.observed_stopped = observed_stopped
         if trajectories is None:
             self.trajectories = {}
         else:
@@ -1647,7 +1816,8 @@ class Movement(object):
     def __init__(self, movement_id, intersection_id=None, direction=None,
                  enter_lane=None, exit_lane=None,
                  enter_link=None, exit_link=None, turning_ratio=1/3,
-                 upstream_weight=None, downstream_weight=None, turning_coefficient_matrix=None,
+                 upstream_weight=None, downstream_weight=None,
+                 turning_coefficient_matrix=None,
                  state_list=None):
         """
         a movement is defined as inflow lane and the corresponding
