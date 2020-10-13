@@ -12,6 +12,7 @@ from glob import glob
 from copy import deepcopy
 from random import random
 from scipy.stats import binom
+
 from traffic_envs.utils import\
     generate_new_route_configuration, delete_buffer_file
 
@@ -244,7 +245,7 @@ class SignalizedNetwork(gym.Env, ABC):
         self._output_corridor_time_space_diagram(config.corridor_e2w,
                                                  os.path.join(output_folder, "e2w_corridor.png"),
                                                  config.intersection_name_list[::-1])
-        # self._output_link_time_space_diagram(os.path.join(output_folder, "link_ts"))
+        self._output_link_time_space_diagram(os.path.join(output_folder, "link_ts"))
         self._output_car_following_scatters(output_folder)
 
     def _output_car_following_scatters(self, folder):
@@ -279,7 +280,7 @@ class SignalizedNetwork(gym.Env, ABC):
         plt.savefig(os.path.join(folder, "car_following.png"), dpi=250)
         plt.close()
 
-    def _output_link_time_space_diagram(self, folder):
+    def _output_link_time_space_diagram(self, folder, link_list=None):
         """
         output link time-space diagram
         :param folder:
@@ -289,7 +290,10 @@ class SignalizedNetwork(gym.Env, ABC):
             os.mkdir(folder)
         lane_colors = ["royalblue", "violet", "dimgrey", "orange", "salmon"]
 
-        for link_id in self.links.keys():
+        if link_list is None:
+            link_list = list(self.links.keys())
+
+        for link_id in link_list:
             link = self.links[link_id]
             trajectories = link.trajectories
             lane_numbers = link.maximum_lane_number
@@ -350,7 +354,10 @@ class SignalizedNetwork(gym.Env, ABC):
             plt.ylabel("Distance (m)")
             plt.xlim([0, self.terminate_steps])
             plt.ylim([0, link.length + 20])
+            plt.title(link_id)
+            # plt.savefig(os.path.join(folder, link_id + ".png"), dpi=300)
             plt.show()
+            plt.close()
 
     def _output_corridor_time_space_diagram(self, link_list, file_name, signals):
         start_dis = 0
@@ -959,7 +966,7 @@ class SignalizedNetwork(gym.Env, ABC):
             # LESSON: DEEPCOPY COULD BE VERY VERY SLOW !!!!!
             # find the leading cv and following cv
             for vehicle_id in vehicle_list:
-                vehicle = self.vehicles[vehicle_id]
+                # vehicle = self.vehicles[vehicle_id]
                 time_out_max = 1000                  # set a time out threshold,
                 # forward search
                 vehicle_cursor = vehicle_id

@@ -7,14 +7,15 @@ from pstats import SortKey
 from policy.null_policy import NullPolicy as Controller
 
 print("Using the default actuate controller")
-from traffic_envs.traffic_env import SignalizedNetwork
+# from traffic_envs.traffic_env import SignalizedNetwork
+from estimation.particle import EstimatedNetwork
 
 PROFILE_MODE = False
 
 
 def run_env():
     # make new gym env
-    env = SignalizedNetwork()
+    env = EstimatedNetwork()
     print(env.action_space)                 # output action space
 
     # set the simulation parameters
