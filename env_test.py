@@ -1,11 +1,15 @@
+import io
+import pstats
+import cProfile
 import numpy as np
-# try:
-#     from policy.max_pressure import MaxPressurePolicy as Controller
-#     print("Using the max pressure controller")
-# except ImportError:
+
+from pstats import SortKey
 from policy.null_policy import NullPolicy as Controller
+
 print("Using the default actuate controller")
 from traffic_envs.traffic_env import SignalizedNetwork
+
+PROFILE_MODE = False
 
 
 def run_env():
@@ -18,7 +22,7 @@ def run_env():
     env.penetration_rate = 0                # set the penetration rate
     env.save_trajs = True                   # enable output trajectories
     env.relative_demand = 0.5               # set relative demand level
-    env.terminate_steps = 3599              # set the simulation steps (MAXIMUM: 3599)
+    env.terminate_steps = 199               # set the simulation steps (MAXIMUM: 3599)
     env.set_mode(actuate_control=True)      # set the controller to be an actuate control
     env.seed(-1)                            # set a random seed for all tests
 
@@ -37,5 +41,17 @@ def run_env():
 
 
 if __name__ == '__main__':
-    # insert the code to be profiled here
-    run_env()
+    if PROFILE_MODE:
+        pr = cProfile.Profile()
+        pr.enable()
+        # ... do something ...
+        run_env()
+        pr.disable()
+        s = io.StringIO()
+        sortby = SortKey.CUMULATIVE
+        ps = pstats.Stats(pr, stream=s).sort_stats(sortby)
+        ps.print_stats()
+        print(s.getvalue())
+    else:
+        run_env()
+

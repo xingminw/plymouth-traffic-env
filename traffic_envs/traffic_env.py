@@ -245,11 +245,48 @@ class SignalizedNetwork(gym.Env, ABC):
                                                  os.path.join(output_folder, "e2w_corridor.png"),
                                                  config.intersection_name_list[::-1])
         # self._output_link_time_space_diagram(os.path.join(output_folder, "link_ts"))
+        self._output_car_following_scatters(output_folder)
+
+    def _output_car_following_scatters(self, folder):
+        plt.figure()
+        points_count = 0
+        for vehicle_id in self.vehicles.keys():
+            vehicle = self.vehicles[vehicle_id]
+            following_dis_list = vehicle.following_dis_list
+            leading_vehicle_list = vehicle.leading_vehicle_list
+            link_pos_list = vehicle.link_pos_list
+            link_list = vehicle.link_list
+            speed_list = vehicle.speed_list
+            valid_dis_list = []
+            valid_speed_list = []
+            for idx in range(len(following_dis_list)):
+                leading_vehicle = leading_vehicle_list[idx]
+                if leading_vehicle is None:
+                    continue
+
+                # ignore the vehicle closed to end of the link
+                dis_to_end = abs(self.links[link_list[idx]].length - link_pos_list[idx])
+                if dis_to_end < 50:
+                    continue
+                points_count += 1
+                valid_dis_list.append(following_dis_list[idx])
+                valid_speed_list.append(speed_list[idx])
+            plt.plot(valid_dis_list, valid_speed_list, "b.", alpha=0.1)
+            if points_count > 50000:
+                break
+        print(os.path.join(folder, "car_following.png"))
+        plt.xlim([0, 130])
+        plt.savefig(os.path.join(folder, "car_following.png"), dpi=250)
+        plt.close()
 
     def _output_link_time_space_diagram(self, folder):
+        """
+        output link time-space diagram
+        :param folder:
+        :return:
+        """
         if not os.path.exists(folder):
             os.mkdir(folder)
-
         lane_colors = ["royalblue", "violet", "dimgrey", "orange", "salmon"]
 
         for link_id in self.links.keys():
@@ -726,8 +763,11 @@ class SignalizedNetwork(gym.Env, ABC):
 
             edge_pos = traci.vehicle.getLanePosition(vehicle_id)
 
-            link_pos = self._get_edge_distance_from_start_of_link(vehicle_link, vehicle_edge)
-            if link_pos is not None:
+            if vehicle_link is None:
+                link_pos = self.vehicles[vehicle_id].link_pos_list[-1] + vehicle_speed
+                vehicle_link = self.vehicles[vehicle_id].link_list[-1]
+            else:
+                link_pos = self._get_edge_distance_from_start_of_link(vehicle_link, vehicle_edge)
                 link_pos += edge_pos
 
             # the following code is to dump the data to vehicle class
@@ -742,8 +782,6 @@ class SignalizedNetwork(gym.Env, ABC):
             self.vehicles[vehicle_id].lane_list.append(vehicle_lane)
             self.vehicles[vehicle_id].link_list.append(vehicle_link)
             self.vehicles[vehicle_id].link_pos_list.append(link_pos)
-            if vehicle_link is None:
-                continue
 
             if not (vehicle_link in link_vehicle_dict.keys()):
                 link_vehicle_dict[vehicle_link] = {"pos": [], "lane": [], "speed": [],
@@ -871,7 +909,8 @@ class SignalizedNetwork(gym.Env, ABC):
                         segment_assigned = True
                         break
                 if not segment_assigned:
-                    exit("segment not assigned!")
+                    original_segment = self.vehicles[vehicle_id].segment_list[-1]
+                    self.vehicles[vehicle_id].segment_list.append(original_segment)
 
                 # get the pipeline id
                 pipeline_assigned = False
@@ -886,7 +925,12 @@ class SignalizedNetwork(gym.Env, ABC):
                         pipeline_vehicle_dict[pipeline_id]["vehicles"].append(vehicle_id)
                         pipeline_vehicle_dict[pipeline_id]["dis"].append(vehicle_pos)
                 if not pipeline_assigned:
-                    exit("pipeline not assigned!")
+                    original_pipeline = self.vehicles[vehicle_id].pipeline_list[-1]
+                    self.vehicles[vehicle_id].pipeline_list.append(original_pipeline)
+                    if not (original_pipeline in pipeline_vehicle_dict.keys()):
+                        pipeline_vehicle_dict[original_pipeline] = {"vehicles": [], "dis": []}
+                    pipeline_vehicle_dict[original_pipeline]["vehicles"].append(vehicle_id)
+                    pipeline_vehicle_dict[original_pipeline]["dis"].append(vehicle_pos)
 
             # sort the vehicle within different pipelines
             for pipeline_id in pipeline_vehicle_dict.keys():
@@ -905,25 +949,26 @@ class SignalizedNetwork(gym.Env, ABC):
                     following_vehicle = new_vehicle_list[vdx]
                     current_vehicle = new_vehicle_list[vdx + 1]
                     leading_vehicle = new_vehicle_list[vdx + 2]
-                    leading_dis = new_distance_list[vdx + 2] - new_distance_list[vdx + 1]
-                    following_dis = new_distance_list[vdx + 1] - new_distance_list[vdx]
+                    following_dis = new_distance_list[vdx + 2] - new_distance_list[vdx + 1]
+                    leading_dis = new_distance_list[vdx + 1] - new_distance_list[vdx]
                     self.vehicles[current_vehicle].leading_dis_list.append(leading_dis)
                     self.vehicles[current_vehicle].leading_vehicle_list.append(leading_vehicle)
                     self.vehicles[current_vehicle].following_dis_list.append(following_dis)
                     self.vehicles[current_vehicle].following_vehicle_list.append(following_vehicle)
 
+            # LESSON: DEEPCOPY COULD BE VERY VERY SLOW !!!!!
             # find the leading cv and following cv
             for vehicle_id in vehicle_list:
                 vehicle = self.vehicles[vehicle_id]
                 time_out_max = 1000                  # set a time out threshold,
                 # forward search
-                vehicle_cursor = deepcopy(vehicle)
+                vehicle_cursor = vehicle_id
                 count = 0
                 while True:
                     count += 1
                     if count > time_out_max:
                         exit("Time out error for finding the forward cv")
-                    leading_vehicle = vehicle_cursor.leading_vehicle_list[-1]
+                    leading_vehicle = self.vehicles[vehicle_cursor].leading_vehicle_list[-1]
                     if leading_vehicle is None:
                         self.vehicles[vehicle_id].leading_cv_list.append(leading_vehicle)
                         break
@@ -931,15 +976,16 @@ class SignalizedNetwork(gym.Env, ABC):
                     if leading_type:
                         self.vehicles[vehicle_id].leading_cv_list.append(leading_vehicle)
                         break
-                    vehicle_cursor = deepcopy(self.vehicles[leading_vehicle])
+                    vehicle_cursor = leading_vehicle
 
-                vehicle_cursor = deepcopy(vehicle)
+                # backward search
+                vehicle_cursor = vehicle_id
                 count = 0
                 while True:
                     count += 1
                     if count > time_out_max:
                         exit("Time out error for finding the backward cv")
-                    following_vehicle = vehicle_cursor.following_vehicle_list[-1]
+                    following_vehicle = self.vehicles[vehicle_cursor].following_vehicle_list[-1]
                     if following_vehicle is None:
                         self.vehicles[vehicle_id].following_cv_list.append(following_vehicle)
                         break
@@ -947,7 +993,7 @@ class SignalizedNetwork(gym.Env, ABC):
                     if following_type:
                         self.vehicles[vehicle_id].following_cv_list.append(following_vehicle)
                         break
-                    vehicle_cursor = deepcopy(self.vehicles[following_vehicle])
+                    vehicle_cursor = following_vehicle
 
     def _add_signal(self, signal):
         if self.signals is None:
