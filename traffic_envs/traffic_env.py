@@ -1485,7 +1485,7 @@ class SignalizedNetwork(gym.Env, ABC):
                 edge_start = link.edge_list[0]
                 edge = self.edges[edge_start]
                 plt.plot(link_shape[0], link_shape[1], "r-", lw=1)
-                plt.plot(edge.shape[0], edge.shape[1], "m-", lw=1)
+                plt.plot(edge.shape[0], edge.shape[1], "g-", lw=1)
 
             for edge_id in self.edges.keys():
                 edge = self.edges[edge_id]
