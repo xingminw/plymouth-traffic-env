@@ -3,9 +3,11 @@ inherit the whole class of traffic env and add a particle filter estimation part
 """
 
 from abc import ABC
+import xml.etree.ElementTree as ET
 from traffic_envs.traffic_env import SignalizedNetwork
 
 import matplotlib.pyplot as plt
+import traffic_envs.config as env_config
 
 
 class EstimatedNetwork(SignalizedNetwork, ABC):
@@ -14,6 +16,9 @@ class EstimatedNetwork(SignalizedNetwork, ABC):
 
         # add additional class of segment and pipeline
         self._add_segment_pipeline()
+
+        # load demand and turning ratio
+        self._load_demand_and_turning_ratio()
 
     def _load_system_state(self):
         """
@@ -45,16 +50,14 @@ class EstimatedNetwork(SignalizedNetwork, ABC):
 
             if not (link.upstream_junction in signalized_junction_list):
                 self.links[link_id].link_type = "source"
-                # print("This is a source link...")
 
-            print(link_id, link.upstream_junction, link.downstream_junction)
-            if link.upstream_junction == link.downstream_junction:
-                print("strange")
             if not (link.downstream_junction in signalized_junction_list):
                 self.links[link_id].link_type = "sink"
-                print("This is a sink link...")
-                exit()
-        exit()
+
+    def _load_demand_and_turning_ratio(self):
+        demand_file = env_config.network_flow_file.split("./")[-1]
+        demand_tree = ET.ElementTree(demand_file)
+        print(demand_tree)
 
 
 class Segments(object):

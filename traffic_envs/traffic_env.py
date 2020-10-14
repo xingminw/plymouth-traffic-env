@@ -1236,7 +1236,7 @@ class SignalizedNetwork(gym.Env, ABC):
 
         # generate the link and movement for the network
         # currently ignore the "dummy" link
-        self._generate_link_movement(debug=True)
+        self._generate_link_movement(debug=False)
 
         self._generate_link_segment_and_pipeline(debug=False)
 
@@ -1370,61 +1370,67 @@ class SignalizedNetwork(gym.Env, ABC):
                 intersection_list.append(junction_id)
                 signalized_intersection[0].append(junction.location[0])
                 signalized_intersection[1].append(junction.location[1])
-        
+
+        edges_list = []
         for signal_id in intersection_list:
             junction = self.junctions[signal_id]
-            edges_list = junction.enter_edges
+            edges_list += junction.enter_edges
 
-            for edge_id in self.edges.keys():
-                edge = self.edges[edge_id]
-                downstream_edges = edge.downstream_edges
-                if edge.downstream_junction is None:
-                    continue
-                downstream_junction = self.junctions[edge.downstream_junction]
-                if len(downstream_edges) == 0:
-                    if downstream_junction.type == "dead_end":
-                        edges_list.append(edge_id)
+        for edge_id in self.edges.keys():
+            edge = self.edges[edge_id]
+            downstream_edges = edge.downstream_edges
+            if edge.downstream_junction is None:
+                continue
+            downstream_junction = self.junctions[edge.downstream_junction]
+            if len(downstream_edges) == 0:
+                if downstream_junction.type == "dead_end":
+                    edges_list.append(edge_id)
 
-            # generate the link from edges
-            for edge_id in edges_list:
-                # edge = self.edges[edge_id]
-                link_edges_list = [edge_id]
-                link = Link()
+        # generate the link from edges
+        for edge_id in edges_list:
+            # edge = self.edges[edge_id]
+            link_edges_list = [edge_id]
+            link = Link()
 
-                # upstream_intersection = None
-                while True:
-                    current_edge_id = link_edges_list[0]
-                    current_edge = self.edges[current_edge_id]
+            # upstream_intersection = None
+            while True:
+                current_edge_id = link_edges_list[0]
+                current_edge = self.edges[current_edge_id]
 
-                    upstream_junction_id = current_edge.upstream_junction
-                    upstream_junction = self.junctions[upstream_junction_id]
+                upstream_junction_id = current_edge.upstream_junction
+                upstream_junction = self.junctions[upstream_junction_id]
 
-                    if upstream_junction.type == "traffic_light":
-                        upstream_intersection = upstream_junction_id
-                        break
-                    upstream_edges = current_edge.upstream_edges
-                    if len(upstream_edges) == 0:
-                        upstream_intersection = upstream_junction_id
-                        break
+                if upstream_junction.type == "traffic_light":
+                    upstream_intersection = upstream_junction_id
+                    break
+                upstream_edges = current_edge.upstream_edges
+                if len(upstream_edges) == 0:
+                    upstream_intersection = upstream_junction_id
+                    break
 
-                    if len(upstream_edges) > 1:
-                        exit("Number of edges are larger than 1.")
-                    link_edges_list = upstream_edges + link_edges_list
+                if len(upstream_edges) > 1:
+                    exit("Number of edges are larger than 1.")
+                link_edges_list = upstream_edges + link_edges_list
 
-                link.edge_list = link_edges_list
+            link.edge_list = link_edges_list
 
-                if len(link_edges_list) <= 1:
-                    link.link_id = link_edges_list[0]
-                else:
-                    link.link_id = link_edges_list[0] + "+" + link_edges_list[1]
+            if len(link_edges_list) <= 1:
+                link.link_id = link_edges_list[0]
+            else:
+                link.link_id = link_edges_list[0] + "+" + link_edges_list[1]
 
-                # add link id to the edges
-                for _edge_id in link.edge_list:
-                    self.edges[_edge_id].link_id = link.link_id
+            # add link id to the edges
+            for _edge_id in link.edge_list:
+                self.edges[_edge_id].link_id = link.link_id
 
-                link.upstream_junction = upstream_intersection
-                link.downstream_junction = signal_id
-                self._add_link(link)
+            upstream_edge = link.edge_list[0]
+            edge = self.edges[upstream_edge]
+            link.upstream_junction = edge.upstream_junction
+
+            downstream_edge = link.edge_list[-1]
+            edge = self.edges[downstream_edge]
+            link.downstream_junction = edge.downstream_junction
+            self._add_link(link)
 
         # generate the movement for signal id
         for signal_id in self.signals.keys():
