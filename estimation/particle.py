@@ -5,6 +5,8 @@ inherit the whole class of traffic env and add a particle filter estimation part
 from abc import ABC
 from traffic_envs.traffic_env import SignalizedNetwork
 
+import matplotlib.pyplot as plt
+
 
 class EstimatedNetwork(SignalizedNetwork, ABC):
     def __init__(self):
@@ -32,7 +34,27 @@ class EstimatedNetwork(SignalizedNetwork, ABC):
         pass
 
     def _add_segment_pipeline(self):
-        pass
+        signalized_junction_list = list(self.signals.keys())
+        for link_id in self.links.keys():
+            link = self.links[link_id]
+            segments = link.segments
+            pipelines = link.pipelines
+
+            # add an additional property to the link
+            self.links[link_id].link_type = "internal"
+
+            if not (link.upstream_junction in signalized_junction_list):
+                self.links[link_id].link_type = "source"
+                # print("This is a source link...")
+
+            print(link_id, link.upstream_junction, link.downstream_junction)
+            if link.upstream_junction == link.downstream_junction:
+                print("strange")
+            if not (link.downstream_junction in signalized_junction_list):
+                self.links[link_id].link_type = "sink"
+                print("This is a sink link...")
+                exit()
+        exit()
 
 
 class Segments(object):

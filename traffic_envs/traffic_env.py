@@ -40,7 +40,7 @@ class SignalizedNetwork(gym.Env, ABC):
                  cost=0, delay_list=None, long_waiting_penalty=0.3, _use_random_seed=True,
                  _is_open=False, observation_space=None, action_space=None, observation_mapping_details=None,
                  save_trajs=False, observation=None, output_cost=False, sumo_seed=None, long_waiting_clip=5,
-                 actuate_control=False, relative_demand=1, observed_cost=0):
+                 actuate_control=False, relative_demand=1, observed_cost=0, time_step=None):
         """
 
         :param terminate_steps: total time slots to terminate the simulation
@@ -68,6 +68,7 @@ class SignalizedNetwork(gym.Env, ABC):
         :param long_waiting_clip:
         :param actuate_control:
         :param relative_demand:
+        :param time_step:
         """
         # simulation parameters
         self.penetration_rate = 1                           # set to be None to disable the CV environment
@@ -93,6 +94,7 @@ class SignalizedNetwork(gym.Env, ABC):
         self.observation = observation
 
         self.sumo_seed = sumo_seed
+        self.time_step = time_step
         self._use_random_seed = _use_random_seed
         self._long_waiting_penalty = long_waiting_penalty
         self._resolution = resolution
@@ -103,6 +105,7 @@ class SignalizedNetwork(gym.Env, ABC):
         # buffer data of the traffic state
         # this buffer data must be reset when the simulation is reset
         self._total_departure = total_departures
+
         if cost_list is None:
             self.cost_list = []
         else:
@@ -157,8 +160,7 @@ class SignalizedNetwork(gym.Env, ABC):
         self._load_system_state()
 
         terminate_flag = False
-        time_step = traci.simulation.getTime()
-        if time_step > self.terminate_steps:
+        if self.time_step > self.terminate_steps:
             terminate_flag = True
             self._close_simulator()
         return self.observation, - self.cost / 10000, terminate_flag, {}
@@ -245,7 +247,7 @@ class SignalizedNetwork(gym.Env, ABC):
         self._output_corridor_time_space_diagram(config.corridor_e2w,
                                                  os.path.join(output_folder, "e2w_corridor.png"),
                                                  config.intersection_name_list[::-1])
-        self._output_link_time_space_diagram(os.path.join(output_folder, "link_ts"))
+        # self._output_link_time_space_diagram(os.path.join(output_folder, "link_ts"))
         self._output_car_following_scatters(output_folder)
 
     def _output_car_following_scatters(self, folder):
@@ -721,6 +723,7 @@ class SignalizedNetwork(gym.Env, ABC):
         """
         # update the loaded vehicles
         time_step = traci.simulation.getTime()
+        self.time_step = time_step
 
         # load signal state
         signal_list = self.observation_mapping_details["signals"]
@@ -1233,12 +1236,9 @@ class SignalizedNetwork(gym.Env, ABC):
 
         # generate the link and movement for the network
         # currently ignore the "dummy" link
-        self._generate_link_movement(debug=False)
+        self._generate_link_movement(debug=True)
 
         self._generate_link_segment_and_pipeline(debug=False)
-
-        # update the shape and length of the link from the edges
-        self._update_link_shape_from_edges()
 
         # load turning ratio
         self._load_movement_turning_ratio()
@@ -1370,7 +1370,7 @@ class SignalizedNetwork(gym.Env, ABC):
                 intersection_list.append(junction_id)
                 signalized_intersection[0].append(junction.location[0])
                 signalized_intersection[1].append(junction.location[1])
-
+        
         for signal_id in intersection_list:
             junction = self.junctions[signal_id]
             edges_list = junction.enter_edges
@@ -1456,6 +1456,9 @@ class SignalizedNetwork(gym.Env, ABC):
                     # print("enter_edge", enter_edge, "exit_edge", exit_edge)
                     exit(movement.movement_id + " link not recognized")
                 self.signals[signal_id].movements[movement_id] = movement
+
+        # update the shape and length of the link from the edges
+        self._update_link_shape_from_edges()
 
         # # test plot
         if debug:
