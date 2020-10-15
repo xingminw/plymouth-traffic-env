@@ -106,6 +106,8 @@ class SignalizedNetwork(gym.Env, ABC):
         # this buffer data must be reset when the simulation is reset
         self._total_departure = total_departures
 
+        self.link_vehicle_dict = {}
+
         if cost_list is None:
             self.cost_list = []
         else:
@@ -825,8 +827,7 @@ class SignalizedNetwork(gym.Env, ABC):
                 self.links[vehicle_link].trajectories[vehicle_id]["distance"].append(link_pos)
                 self.links[vehicle_link].trajectories[vehicle_id]["lane"].append(int(vehicle_lane[-1]))
 
-        # sort the vehicle within the link and get their leading following relationship (pipeline)
-        self._sort_vehicle_within_link(link_vehicle_dict)
+        self.link_vehicle_dict = link_vehicle_dict
 
         system_delay = current_blocked_num
         system_cost = self._long_waiting_clip * current_blocked_num
@@ -890,120 +891,6 @@ class SignalizedNetwork(gym.Env, ABC):
         self.cost = system_cost
         self.observed_cost = observed_cost
         self._generate_observation()
-
-    def _sort_vehicle_within_link(self, link_vehicle_dict):
-        for link_id in self.links.keys():
-            link = self.links[link_id]
-
-            # get the pipelines and segments of the link
-            pipelines = link.pipelines
-            segments = link.segments
-
-            if not (link_id in link_vehicle_dict.keys()):
-                continue
-            vehicle_list = link_vehicle_dict[link_id]["vehicles"]
-
-            pipeline_vehicle_dict = {}
-            for vehicle_id in vehicle_list:
-                vehicle = self.vehicles[vehicle_id]
-                vehicle_lane = vehicle.lane_list[-1]
-                vehicle_edge = self.lanes[vehicle_lane].edge_id
-                vehicle_pos = vehicle.link_pos_list[-1]
-
-                # get the segment
-                segment_assigned = False
-                for segment_id in segments.keys():
-                    segment_edges = segments[segment_id]
-                    if vehicle_edge in segment_edges:
-                        self.vehicles[vehicle_id].segment_list.append(segment_id)
-                        segment_assigned = True
-                        break
-                if not segment_assigned:
-                    original_segment = self.vehicles[vehicle_id].segment_list[-1]
-                    self.vehicles[vehicle_id].segment_list.append(original_segment)
-
-                # get the pipeline id
-                pipeline_assigned = False
-                for pipeline_id in pipelines:
-                    pipeline_lanes = pipelines[pipeline_id]
-                    if vehicle_lane in pipeline_lanes:
-                        self.vehicles[vehicle_id].pipeline_list.append(pipeline_id)
-                        pipeline_assigned = True
-
-                        if not (pipeline_id in pipeline_vehicle_dict.keys()):
-                            pipeline_vehicle_dict[pipeline_id] = {"vehicles": [], "dis": []}
-                        pipeline_vehicle_dict[pipeline_id]["vehicles"].append(vehicle_id)
-                        pipeline_vehicle_dict[pipeline_id]["dis"].append(vehicle_pos)
-                if not pipeline_assigned:
-                    original_pipeline = self.vehicles[vehicle_id].pipeline_list[-1]
-                    self.vehicles[vehicle_id].pipeline_list.append(original_pipeline)
-                    if not (original_pipeline in pipeline_vehicle_dict.keys()):
-                        pipeline_vehicle_dict[original_pipeline] = {"vehicles": [], "dis": []}
-                    pipeline_vehicle_dict[original_pipeline]["vehicles"].append(vehicle_id)
-                    pipeline_vehicle_dict[original_pipeline]["dis"].append(vehicle_pos)
-
-            # sort the vehicle within different pipelines
-            for pipeline_id in pipeline_vehicle_dict.keys():
-                distance_list = pipeline_vehicle_dict[pipeline_id]["dis"]
-                vehicle_id_list = pipeline_vehicle_dict[pipeline_id]["vehicles"]
-                sequence = np.argsort(distance_list)
-                new_vehicle_list = []
-                new_distance_list = []
-                for sdx in sequence:
-                    new_vehicle_list.append(vehicle_id_list[sdx])
-                    new_distance_list.append(distance_list[sdx])
-
-                new_distance_list = [0] + new_distance_list + [link.length]
-                new_vehicle_list = [None] + new_vehicle_list + [None]
-                for vdx in range(len(new_vehicle_list) - 2):
-                    following_vehicle = new_vehicle_list[vdx]
-                    current_vehicle = new_vehicle_list[vdx + 1]
-                    leading_vehicle = new_vehicle_list[vdx + 2]
-                    following_dis = new_distance_list[vdx + 2] - new_distance_list[vdx + 1]
-                    leading_dis = new_distance_list[vdx + 1] - new_distance_list[vdx]
-                    self.vehicles[current_vehicle].leading_dis_list.append(leading_dis)
-                    self.vehicles[current_vehicle].leading_vehicle_list.append(leading_vehicle)
-                    self.vehicles[current_vehicle].following_dis_list.append(following_dis)
-                    self.vehicles[current_vehicle].following_vehicle_list.append(following_vehicle)
-
-            # LESSON: DEEPCOPY COULD BE VERY VERY SLOW !!!!!
-            # find the leading cv and following cv
-            for vehicle_id in vehicle_list:
-                # vehicle = self.vehicles[vehicle_id]
-                time_out_max = 1000                  # set a time out threshold,
-                # forward search
-                vehicle_cursor = vehicle_id
-                count = 0
-                while True:
-                    count += 1
-                    if count > time_out_max:
-                        exit("Time out error for finding the forward cv")
-                    leading_vehicle = self.vehicles[vehicle_cursor].leading_vehicle_list[-1]
-                    if leading_vehicle is None:
-                        self.vehicles[vehicle_id].leading_cv_list.append(leading_vehicle)
-                        break
-                    leading_type = self.vehicles[leading_vehicle].cv_type
-                    if leading_type:
-                        self.vehicles[vehicle_id].leading_cv_list.append(leading_vehicle)
-                        break
-                    vehicle_cursor = leading_vehicle
-
-                # backward search
-                vehicle_cursor = vehicle_id
-                count = 0
-                while True:
-                    count += 1
-                    if count > time_out_max:
-                        exit("Time out error for finding the backward cv")
-                    following_vehicle = self.vehicles[vehicle_cursor].following_vehicle_list[-1]
-                    if following_vehicle is None:
-                        self.vehicles[vehicle_id].following_cv_list.append(following_vehicle)
-                        break
-                    following_type = self.vehicles[following_vehicle].cv_type
-                    if following_type:
-                        self.vehicles[vehicle_id].following_cv_list.append(following_vehicle)
-                        break
-                    vehicle_cursor = following_vehicle
 
     def _add_signal(self, signal):
         if self.signals is None:
@@ -1872,6 +1759,10 @@ class Link(object):
             self.vehicles = []
         else:
             self.vehicles = current_vehicles
+
+        # for the particle filter
+        self.link_type = None
+        self.lane_change_events = None
 
 
 class Movement(object):
