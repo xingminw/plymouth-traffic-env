@@ -1,0 +1,68 @@
+import numpy as np
+from scipy.stats import norm
+
+
+class StochasticNewellCarFollowing(object):
+    """
+    class for a naive stochastic Newell's car-following
+    including: how to sample speed from distance headway and
+                give the probability distribution according to a headway/speed pair
+    """
+    def __init__(self):
+        self.free_flow_speed = 15
+        self.jam_density = 7
+        self.free_density = 50
+        self.maximum_sigma = 2.5
+        self.minimum_sigma = 0.01
+
+    def sample_next_locations(self, location_list, _, time_interval):
+        """
+
+        :param location_list:
+        :param _: null
+        :param time_interval:
+        :return:
+        """
+        speed_list = self._get_speed_list(location_list)
+        new_locations = np.array(location_list[1:]) + time_interval * np.array(speed_list)
+        return new_locations.tolist()
+
+    def sample_following_speed(self, headway, sample_size):
+        """
+        sample the following speed according to the distance headway
+        :param headway:
+        :param sample_size:
+        :return:
+        """
+        [mean, sigma] = self._get_mean_sigma(headway)
+        return norm.rvs(mean, sigma, sample_size)
+
+    def get_particle_weight(self):
+        pass
+
+    def get_pdf(self, headway, speed):
+        [mean, sigma] = self._get_mean_sigma(headway)
+        return norm.pdf(speed, mean, sigma)
+
+    def _get_speed_list(self, location_list):
+        headway_list = [-val for val in np.diff(location_list)]
+        speed_list = [self.sample_following_speed(val, 1)[0] for val in headway_list]
+        return speed_list
+
+    def _get_mean_sigma(self, headway):
+        """
+        get mean and std variance according to distance headway
+        :param headway:
+        :return:
+        """
+        if headway <= self.jam_density:
+            return [0, self.minimum_sigma]
+        elif headway <= self.free_density:
+            proportion = (headway - self.jam_density) / (self.free_density - self.jam_density)
+            mean_speed = proportion * self.free_flow_speed
+            sigma = self.minimum_sigma + (self.maximum_sigma - self.minimum_sigma) * proportion
+            return [mean_speed, sigma]
+        elif headway > self.free_density:
+            return [self.free_flow_speed, self.maximum_sigma]
+        else:
+            print("check the error, the headway is:", headway)
