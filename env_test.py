@@ -10,7 +10,7 @@ print("Using the default actuate controller")
 # from traffic_envs.traffic_env import SignalizedNetwork
 from estimation.particle import EstimatedNetwork
 
-PROFILE_MODE = False
+PROFILE_MODE = True
 
 
 def run_env():
@@ -19,11 +19,11 @@ def run_env():
     print(env.action_space)                 # output action space
 
     # set the simulation parameters
-    env.output_cost = True                  # enable output figure
-    env.penetration_rate = 0                # set the penetration rate
-    env.save_trajs = True                   # enable output trajectories
+    env.output_cost = False                  # enable output figure
+    env.penetration_rate = 0.5                # set the penetration rate
+    env.save_trajs = False                   # enable output trajectories
     env.relative_demand = 0.5               # set relative demand level
-    env.terminate_steps = 199               # set the simulation steps (MAXIMUM: 3599)
+    env.terminate_steps = 1199               # set the simulation steps (MAXIMUM: 3599)
     env.set_mode(actuate_control=True)      # set the controller to be an actuate control
     env.seed(-1)                            # set a random seed for all tests
 
@@ -52,7 +52,8 @@ if __name__ == '__main__':
         sortby = SortKey.CUMULATIVE
         ps = pstats.Stats(pr, stream=s).sort_stats(sortby)
         ps.print_stats()
-        print(s.getvalue())
+        # print(s.getvalue())
+        with open("profile.txt", "w") as temp_file:
+            temp_file.write(s.getvalue())
     else:
         run_env()
-

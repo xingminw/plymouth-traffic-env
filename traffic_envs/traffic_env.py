@@ -250,7 +250,7 @@ class SignalizedNetwork(gym.Env, ABC):
                                                  os.path.join(output_folder, "e2w_corridor.png"),
                                                  config.intersection_name_list[::-1])
         # self._output_link_time_space_diagram(os.path.join(output_folder, "link_ts"))
-        self._output_car_following_scatters(output_folder)
+        # self._output_car_following_scatters(output_folder)
 
     def _output_car_following_scatters(self, folder):
         plt.figure()
@@ -1759,10 +1759,6 @@ class Link(object):
             self.vehicles = []
         else:
             self.vehicles = current_vehicles
-
-        # for the particle filter
-        self.link_type = None
-        self.lane_change_events = None
 
 
 class Movement(object):

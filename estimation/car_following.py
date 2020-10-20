@@ -2,6 +2,50 @@ import numpy as np
 from scipy.stats import norm
 
 
+class DeterministicSimplifiedModel(object):
+    """
+
+    """
+    def __init__(self):
+        self.free_flow_speed = 15
+        self.jam_density = 7
+        self.free_density = 50
+
+    def _get_mean(self, headway):
+        """
+        get mean and std variance according to distance headway
+        :param headway:
+        :return:
+        """
+        if headway <= self.jam_density:
+            return 0
+        elif headway <= self.free_density:
+            proportion = (headway - self.jam_density) / (self.free_density - self.jam_density)
+            mean_speed = proportion * self.free_flow_speed
+            return mean_speed
+        elif headway > self.free_density:
+            return self.free_flow_speed
+        else:
+            print("check the error, the headway is:", headway)
+
+    def _get_speed_list(self, location_list):
+        headway_list = np.diff(location_list)
+        speed_list = [self._get_mean(val) for val in headway_list]
+        return speed_list
+
+    def sample_next_locations(self, location_list, _, time_interval):
+        """
+
+        :param location_list:
+        :param _: null
+        :param time_interval:
+        :return:
+        """
+        speed_list = self._get_speed_list(location_list)
+        new_locations = np.array(location_list[:-1]) + time_interval * np.array(speed_list)
+        return new_locations.tolist()
+
+
 class StochasticNewellCarFollowing(object):
     """
     class for a naive stochastic Newell's car-following
