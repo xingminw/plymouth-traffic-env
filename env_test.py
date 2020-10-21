@@ -22,8 +22,8 @@ def run_env():
     env.output_cost = False                  # enable output figure
     env.penetration_rate = 0.5                # set the penetration rate
     env.save_trajs = False                   # enable output trajectories
-    env.relative_demand = 0.5               # set relative demand level
-    env.terminate_steps = 1199               # set the simulation steps (MAXIMUM: 3599)
+    env.relative_demand = 0.8               # set relative demand level
+    env.terminate_steps = 119               # set the simulation steps (MAXIMUM: 3599)
     env.set_mode(actuate_control=True)      # set the controller to be an actuate control
     env.seed(-1)                            # set a random seed for all tests
 

@@ -19,7 +19,7 @@ class EstimatedNetwork(SignalizedNetwork, ABC):
         SignalizedNetwork.__init__(self)
 
         # number of particles
-        self.particle_number = 10
+        self.particle_number = 5
 
         # load demand and turning ratio
         demand_dict, turning_dict = self._load_demand_and_turning_ratio()
@@ -52,6 +52,46 @@ class EstimatedNetwork(SignalizedNetwork, ABC):
         for link_id in self.links.keys():
             self.links[link_id].particle_forward()
 
+        self.update_downstream_dis()
+        # exit()
+
+    def update_downstream_dis(self):
+        for link_id in self.links.keys():
+            link = self.links[link_id]
+            pipelines = link.pipelines
+            for pip_id in pipelines.keys():
+                pipeline = pipelines[pip_id]
+                directions = pipeline.direction
+                if directions is None:
+                    continue
+                signals = pipeline.signal
+                movements = pipeline.movement
+                downstream_links = pipeline.downstream_links
+                downstream_pips = pipeline.downstream_pipelines
+                downstream_dis = {}
+
+                for i_dir in range(len(directions)):
+                    direction = directions[i_dir]
+                    signal_state = self.signals[signals[i_dir]].movements[movements[i_dir]].state_list[-1]
+                    if signal_state:
+                        local_downstream_dis = [2 * link.length] * self.particle_number
+                    else:
+                        local_downstream_dis = [link.length] * self.particle_number
+                        downstream_pip = self.links[downstream_links[i_dir]].pipelines[downstream_pips[i_dir]]
+                        particles = downstream_pip.particles
+                        for ip in range(self.particle_number):
+                            if len(particles["start"][ip][0]) == 0:
+                                if len(particles) == 1:
+                                    continue
+                                else:
+                                    dis = downstream_pip.vehicles[1][0]
+                                    print("stop here", dis)
+                                    exit(downstream_pip.vehicles)
+                                    local_downstream_dis[ip] = dis
+                            local_downstream_dis[ip] = particles["start"][ip][0][0]
+                    downstream_dis[direction] = local_downstream_dis
+                    self.links[link_id].pipelines[pip_id].downstream_dis = downstream_dis
+
     def _generate_observation(self):
         """
 
@@ -75,8 +115,18 @@ class EstimatedNetwork(SignalizedNetwork, ABC):
             new_pipeline_dict = {}
             for pip_idx in pipelines.keys():
                 lane_list = pipelines[pip_idx]
+                pipeline_length = 0
+                for lane_id in lane_list:
+                    lane = self.lanes[lane_id]
+                    pipeline_length += lane.length
                 pipeline = PipeLine(lane_list[-1], lane_list, self.particle_number)
+                pipeline.length = pipeline_length
+                pipeline.start_dis = link.length - pipeline_length
                 new_pipeline_dict[pipeline.id] = pipeline
+
+            # there is one abnormal
+            if len(link.segments) > 2:
+                print(link_id, "is not correct for the left turn pipeline...")
 
             # load the new pipeline object to the link
             self.links[link_id].pipelines = new_pipeline_dict
@@ -167,6 +217,7 @@ class EstimatedNetwork(SignalizedNetwork, ABC):
 
                 downstream_num = len(movement_list)
                 downstream_pips = []
+                downstream_links = []
                 for t in range(downstream_num):
                     local_movement = movement_list[t]
                     local_signal = signal_list[t]
@@ -175,7 +226,9 @@ class EstimatedNetwork(SignalizedNetwork, ABC):
                     downstream_link = movement.exit_link
                     downstream_pipeline = self.links[downstream_link].get_lane_belonged_pipeline(downstream_lane)
                     downstream_pips.append(downstream_pipeline)
+                    downstream_links.append(downstream_link)
                 self.links[link_id].pipelines[pip_id].downstream_pipelines = downstream_pips
+                self.links[link_id].pipelines[pip_id].downstream_links = downstream_links
 
     @staticmethod
     def _load_demand_and_turning_ratio():
@@ -408,18 +461,25 @@ class ParticleLink(Link):
             [pr_cv_list, _] = pipeline.previous_vehicles
             link_cv_list += pr_cv_list
 
+        # remove exit vehicles
         for pip_id in pipelines.keys():
             pipeline = pipelines[pip_id]
-
-            [pr_cv_list, pr_cv_distance_list] = pipeline.previous_vehicles
-            [cv_list, cv_distance_list] = pipeline.vehicles
 
             # remove exit vehicles
             particle_key_list = list(pipeline.particles.keys())
             if len(particle_key_list) > 1:
                 if not (particle_key_list[-1] in link_cv_list):
-                    print("remove", particle_key_list[-1], "from", pip_id, "at")
+                    # print("remove", particle_key_list[-1], "from", pip_id, "at")
                     del self.pipelines[pip_id].particles[particle_key_list[-1]]
+
+        # perform a one-slot car following (prediction)
+        self.step()
+
+        for pip_id in pipelines.keys():
+            pipeline = pipelines[pip_id]
+
+            # [pr_cv_list, pr_cv_distance_list] = pipeline.previous_vehicles
+            [cv_list, cv_distance_list] = pipeline.vehicles
 
             new_arrival = False
             # event: new arrival
@@ -438,26 +498,11 @@ class ParticleLink(Link):
         # deal with the lane changing
         self.sort_lane_changing_events()
         if len(self.lane_change_events) > 0:
-            print(self.lane_change_events)
+            # print(self.lane_change_events)
             for cv_id in self.lane_change_events.keys():
                 [from_pip, to_pip, cv_dis] = self.lane_change_events[cv_id]
                 self.pipelines[from_pip].remove_cv(cv_id)
                 self.pipelines[to_pip].insert_cv(cv_id, cv_dis)
-
-        # perform a one-slot car following
-        self.step()
-
-        # check
-        for pip_id in pipelines.keys():
-            pipeline = pipelines[pip_id]
-
-            [pr_cv_list, pr_cv_distance_list] = pipeline.previous_vehicles
-            [cv_list, cv_distance_list] = pipeline.vehicles
-            # if len(cv_list) > 0:
-            particle_keys = list(self.pipelines[pip_id].particles.keys())[1:]
-            if particle_keys != cv_list:
-                print("new particle does not correct", pip_id, particle_keys,
-                      self.pipelines[pip_id].previous_vehicles[0], cv_list)
 
     def sort_lane_changing_events(self):
         if len(self.lane_change_events) <= 1:
@@ -486,43 +531,40 @@ class ParticleLink(Link):
         self.turning_info = [ratio_list, pipeline_list]
 
     def step(self):
-        lane_change_event = self.lane_change_events
-        lane_change_flag = len(lane_change_event) + 1
-        # print()
-        if lane_change_event:
-            # print(lane_change_event)
-            pass
-
         # stochastic car-following model
         for pip_id in self.pipelines.keys():
             pipeline = self.pipelines[pip_id]
             particles = pipeline.particles
             direction = pipeline.direction
 
-            [cv_list, cv_distance_list] = deepcopy(pipeline.vehicles)
-            if lane_change_flag:
-                # print(pip_id, cv_list, particles)
-                pass
-            cv_distance_list += [1000000]
+            [cv_list, cv_distance_list] = deepcopy(pipeline.previous_vehicles)
             downstream_num = len(direction)
+            downstream_dis = pipeline.downstream_dis
 
-            for ido in range(downstream_num):
-                pass
-
-            count = 0
-            # print(particles.keys(), cv_list)
-            for follow_id in particles.keys():
-                # print(follow_id)
-                last_distance = cv_distance_list[count]
-                local_particles = particles[follow_id]
+            particle_keys = list(particles.keys())
+            print(particle_keys, cv_list)
+            for i_p in range(len(particle_keys)):
+                if i_p == len(particle_keys) - 1:
+                    last_distance = False
+                else:
+                    last_distance = cv_distance_list[i_p]
+                cv_id = particle_keys[i_p]
+                local_particles = particles[cv_id]
                 for pdx in range(pipeline.particle_number):
+                    if not last_distance:
+                        if downstream_dis is None:
+                            last_distance = 2 * self.length
+                            print("here")
+                        else:
+                            if downstream_num > 1:
+                                pass
+                            else:
+                                last_distance = downstream_dis[direction][pdx]
+
                     [location_list, lane_change_list] = local_particles[pdx]
                     new_location_list = \
                         self.car_following.sample_next_locations(location_list + [last_distance], None, 1)
-                    self.pipelines[pip_id].particles[follow_id][pdx][0] = new_location_list
-        if lane_change_flag:
-            # exit()
-            pass
+                    self.pipelines[pip_id].particles[cv_id][pdx][0] = new_location_list
 
     def get_lane_belonged_pipeline(self, lane_id):
         for pip_id in self.pipelines.keys():
@@ -543,12 +585,18 @@ class PipeLine(object):
         self.index = int(pipeline_id[-1])
         self.lane_list = lane_list
 
+        self.length = None
+        self.start_dis = None
+
         self.direction = None
         self.signal = None
         self.movement = None
         self.downstream_links = None
         self.downstream_pipelines = None
         self.tail_length = None
+
+        self.downstream_dis = None
+        self.upstream_arrival = None
 
         # real-time state
         self.vehicles = [[], []]
@@ -564,7 +612,7 @@ class PipeLine(object):
         new_keys = old_keys[:1] + [cv_id] + old_keys[1:]
         self.previous_vehicles[0] = [cv_id] + self.previous_vehicles[0]
         self.previous_vehicles[1] = [cv_dis] + self.previous_vehicles[1]
-        print("add", cv_dis, cv_id, self.id)
+        # print("add", cv_dis, cv_id, self.id)
 
         new_particles = {}
         for ik in new_keys:
@@ -664,9 +712,6 @@ class PipeLine(object):
 
     def remove_cv(self, cv_id):
         if not (cv_id in self.particles.keys()):
-            # print()
-            # print(self.particles.keys())
-            # print(self.previous_vehicles, self.vehicles)
             exit("CV id " + cv_id + " not in the particle keys! (" + str(self.id) + ")")
 
         merge_cv_index = None
