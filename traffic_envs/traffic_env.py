@@ -18,6 +18,7 @@ from traffic_envs.utils import\
 
 
 __author__ = "Xingmin Wang"
+LIBSUMO_FLAG = False
 
 
 sumoBinary = config.sumoBinary
@@ -28,7 +29,9 @@ else:
     # use libsumo to replace traci to speed up (cannot use gui...)
     try:
         import libsumo as traci
+        LIBSUMO_FLAG = True
     except ImportError:
+        LIBSUMO_FLAG = False
         print("libsumo is not installed correctly, use traci instead...")
         import traci
 
@@ -730,7 +733,7 @@ class SignalizedNetwork(gym.Env, ABC):
         # load signal state
         signal_list = self.observation_mapping_details["signals"]
         for signal_id in signal_list:
-            if config.GUI_MODE:
+            if not LIBSUMO_FLAG:
                 local_state = traci.trafficlight.getRedYellowGreenState(signal_id)
             else:
                 local_state = traci.trafficlight_getRedYellowGreenState(signal_id)
