@@ -1,5 +1,12 @@
 """
 inherit the whole class of traffic env and add a particle filter estimation part
+
+TODO 1: link the upstream and downstream...
+TODO 2: add lane changing
+TODO 3: visualization !!! (images->video)
+
+TODO (others): add parallel computing..., there is an error about the cv sequence, Plymouth E, 218 219
+
 """
 
 from abc import ABC
@@ -57,6 +64,21 @@ class EstimatedNetwork(SignalizedNetwork, ABC):
         self.link_communication()
 
     def link_communication(self):
+        """
+        update the downstream constraints
+
+        TODO: the right-turn movement did not consider the potential conflict
+        :return:
+        """
+        # initiate and clean the upstream arrival
+        for link_id in self.links.keys():
+            link = self.links[link_id]
+            if link.link_type == "source":
+                continue
+            pipelines = link.pipelines
+            for pip_id in pipelines.keys():
+                self.links[link_id].pipelines[pip_id].upstream_arrival = [0] * self.particle_number
+
         for link_id in self.links.keys():
             link = self.links[link_id]
             pipelines = link.pipelines
@@ -69,36 +91,42 @@ class EstimatedNetwork(SignalizedNetwork, ABC):
                 movements = pipeline.movement
                 downstream_links = pipeline.downstream_links
                 downstream_pips = pipeline.downstream_pipelines
+                outflow = pipeline.outflow
+                outflow_flag = outflow is not None
+                # print(outflow)
                 downstream_dis = {}
 
                 for i_dir in range(len(directions)):
+                    downstream_pip_id = downstream_pips[i_dir]
                     direction = directions[i_dir]
                     signal_state = self.signals[signals[i_dir]].movements[movements[i_dir]].state_list[-1]
-                    if signal_state:
-                        local_downstream_dis = [2 * link.length] * self.particle_number
-                    else:
-                        local_downstream_dis = [link.length] * self.particle_number
-                        downstream_pip = self.links[downstream_links[i_dir]].pipelines[downstream_pips[i_dir]]
-                        particles = downstream_pip.particles
-                        for ip in range(self.particle_number):
-                            if len(particles["start"][ip][0]) == 0:
-                                if len(particles) == 1:
+                    downstream_pip = self.links[downstream_links[i_dir]].pipelines[downstream_pip_id]
+                    downstream_particles = downstream_pip.particles
+
+                    local_downstream_dis = [link.length] * self.particle_number
+                    for ip in range(self.particle_number):
+                        if outflow_flag:
+                            if outflow[direction][ip] is not None:
+                                self.links[downstream_links[i_dir]].pipelines[downstream_pip_id].upstream_arrival[
+                                    ip] = outflow[direction][ip] - 1
+
+                        # if the signal is green
+                        if signal_state:
+                            local_downstream_dis[ip] = 2 * link.length
+                            if len(downstream_particles["start"][ip][0]) == 0:
+                                if len(downstream_pip.vehicles[0]) == 0:
                                     continue
                                 else:
                                     dis = downstream_pip.vehicles[1][0]
-                                    print("stop here", dis)
-                                    exit(downstream_pip.vehicles)
+                                    # todo: not fully tested yet
                                     local_downstream_dis[ip] = dis
-                            local_downstream_dis[ip] = particles["start"][ip][0][0]
+                            else:
+                                local_downstream_dis[ip] = downstream_particles["start"][ip][0][0]
+
                     downstream_dis[direction] = local_downstream_dis
-                    self.links[link_id].pipelines[pip_id].downstream_dis = downstream_dis
 
-    def _generate_observation(self):
-        """
-
-        :return:
-        """
-        pass
+                # dump the downstream distance to the current pipeline
+                self.links[link_id].pipelines[pip_id].downstream_dis = downstream_dis
 
     def _add_link_properties(self, demand_dict, turning_dict):
         signalized_junction_list = list(self.signals.keys())
@@ -454,7 +482,7 @@ class ParticleLink(Link):
         self.particle_arrival = None
 
     def particle_forward(self):
-        if self.link_type != "source":
+        if self.link_type == "sink" or self.link_type == "wrong":
             return
         pipelines = self.pipelines
         link_cv_list = []
@@ -492,12 +520,11 @@ class ParticleLink(Link):
                     new_arrival = True
 
             # if there is no new arrival cv, then generate the arrival for particle
-            if self.link_type == "source":
-                if not new_arrival:
-                    self.pipelines[pip_id].generate_new_arrival(self.particle_arrival, self.turning_info)
-                else:
-                    # update the pipeline particle accordingly
-                    self.pipelines[pip_id].new_cv_arrived(cv_list[0], cv_distance_list[0])
+            if not new_arrival:
+                self.pipelines[pip_id].generate_new_arrival(self.particle_arrival, self.turning_info)
+            else:
+                # update the pipeline particle accordingly
+                self.pipelines[pip_id].new_cv_arrived(cv_list[0], cv_distance_list[0])
 
         # deal with the lane changing
         self.sort_lane_changing_events()
@@ -542,6 +569,7 @@ class ParticleLink(Link):
             particles = pipeline.particles
             direction = pipeline.direction
             pipeline.outflow = {}
+
             for i_dir in direction:
                 self.pipelines[pip_id].outflow[i_dir] = [None] * pipeline.particle_number
 
@@ -553,14 +581,29 @@ class ParticleLink(Link):
 
             # check cv list
             if particle_keys[1:] != cv_list:
-                print(self.link_id, pip_id, "not consistent")
-                print(cv_list, cv_distance_list)
-                print(particle_keys[1:])
-                print(self.lane_change_events)
-                exit("not consistent error!")
+                if set(particle_keys[1:]) == set(cv_list):
+                    # print("correct sequence")
+                    # print("particle keys", particle_keys[1:])
+                    # print("cv list", cv_list, cv_distance_list)
+                    # correct the sequence
+                    new_keys_list = ["start"] + cv_list
+                    new_particles = {}
+                    for i_v in new_keys_list:
+                        new_particles[i_v] = particles[i_v]
+                    self.pipelines[pip_id].particles = new_particles
+                    particle_keys = new_keys_list
+                    # print("corrected keys", list(self.pipelines[pip_id].particles.keys()))
+                    # exit()
+                else:
+                    print("\n report error information")
+                    print(self.link_id, pip_id, "not consistent")
+                    print(cv_list, cv_distance_list)
+                    print(particle_keys[1:])
+                    print(self.lane_change_events)
+                    exit("not consistent error!")
 
             for i_p in range(len(cv_list)):
-                if i_p == len(particle_keys) - 1:
+                if i_p == len(cv_list) - 1:
                     last_distance = False
                 else:
                     last_distance = cv_distance_list[i_p]
@@ -599,7 +642,6 @@ class ParticleLink(Link):
 
                     exit_length = pipeline.exit_length[direction_flag]
                     outreach_length = new_location_list[-1] - exit_length
-
                     # put the vehicle to out flow
                     if outreach_length > 0:
                         self.pipelines[pip_id].outflow[direction_flag][pdx] = outreach_length
@@ -668,13 +710,16 @@ class PipeLine(object):
         self.particles = new_particles
 
     def generate_new_arrival(self, arrival_rate, turning_info):
-        if arrival_rate is None:
-            return
         [ratio_list, pip_list] = turning_info
 
         # generate the arrival series
-        arrival_seeds = uniform.rvs(size=self.particle_number)
-        arrival_list = [val < arrival_rate for val in arrival_seeds]
+        if arrival_rate is not None:
+            arrival_seeds = uniform.rvs(size=self.particle_number)
+            arrival_list = [val < arrival_rate for val in arrival_seeds]
+        else:
+            if self.upstream_arrival is None:
+                return
+            arrival_list = self.upstream_arrival
 
         # generate the turning series
         turning_seeds = uniform.rvs(size=self.particle_number)
@@ -682,18 +727,18 @@ class PipeLine(object):
 
         for ip in range(self.particle_number):
             if arrival_list[ip]:
-                self.particles["start"][ip][0] = [0] + self.particles["start"][ip][0]
+                self.particles["start"][ip][0] = [arrival_list[ip] + 1] + self.particles["start"][ip][0]
 
                 if turning_seeds[ip] < ratio_list[0]:
                     local_pips = [int(val[-1]) for val in pip_list[0]]
                     chosen_pip = local_pips[pip_seeds[ip] % len(local_pips)]
                     direction = "l"
                 elif ratio_list[0] < turning_seeds[ip] < (ratio_list[0] + ratio_list[1]):
-                    local_pips = [int(val[-1]) for val in pip_list[0]]
+                    local_pips = [int(val[-1]) for val in pip_list[1]]
                     chosen_pip = local_pips[pip_seeds[ip] % len(local_pips)]
                     direction = "s"
                 else:
-                    local_pips = [int(val[-1]) for val in pip_list[0]]
+                    local_pips = [int(val[-1]) for val in pip_list[2]]
                     chosen_pip = local_pips[pip_seeds[ip] % len(local_pips)]
                     direction = "r"
                 # the vehicle will only turn when necessary
