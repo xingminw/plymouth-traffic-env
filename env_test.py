@@ -10,7 +10,7 @@ print("Using the default actuate controller")
 # from traffic_envs.traffic_env import SignalizedNetwork
 from estimation.particle import EstimatedNetwork
 
-PROFILE_MODE = True
+PROFILE_MODE = False
 
 
 def run_env():
@@ -23,7 +23,7 @@ def run_env():
     env.penetration_rate = 0.5                # set the penetration rate
     env.save_trajs = False                   # enable output trajectories
     env.relative_demand = 0.8               # set relative demand level
-    env.terminate_steps = 119               # set the simulation steps (MAXIMUM: 3599)
+    env.terminate_steps = 299               # set the simulation steps (MAXIMUM: 3599)
     env.set_mode(actuate_control=True)      # set the controller to be an actuate control
     env.seed(-1)                            # set a random seed for all tests
 

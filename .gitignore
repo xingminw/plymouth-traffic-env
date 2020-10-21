@@ -127,3 +127,5 @@ dmypy.json
 sumo/
 
 .idea/
+
+profile.txt
