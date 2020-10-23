@@ -15,8 +15,9 @@ from copy import deepcopy
 from estimation.car_following import DeterministicSimplifiedModel
 from traffic_envs.traffic_env import SignalizedNetwork, Link
 
+import os
 import numpy as np
-# import matplotlib.pyplot as plt
+import matplotlib.pyplot as plt
 import xml.etree.ElementTree as ET
 import traffic_envs.config as env_config
 
@@ -41,6 +42,7 @@ class EstimatedNetwork(SignalizedNetwork, ABC):
         """
         SignalizedNetwork._load_system_state(self)
         self.particle_filter()
+        self._output_particle_posterior()
 
     def set_mode(self, actuate_control):
         self.actuate_control = actuate_control
@@ -445,6 +447,80 @@ class EstimatedNetwork(SignalizedNetwork, ABC):
         for link_id in self.links.keys():
             self.links[link_id].update_turning_dict()
 
+    def _output_particle_posterior(self):
+        plt.figure(figsize=[14, 7])
+        for edge_id in self.edges.keys():
+            edge = self.edges[edge_id]
+            for lane_id in edge.lanes_list:
+                plt.plot(self.lanes[lane_id].shape[0], self.lanes[lane_id].shape[1], "k-", lw=1, alpha=0.5)
+        if not os.path.exists(env_config.output_particle_folder):
+            os.mkdir(env_config.output_particle_folder)
+
+        # add the connected vehicles
+        connected_x = []
+        connected_y = []
+        for link_id in self.links.keys():
+            link = self.links[link_id]
+            pipelines = link.pipelines
+            for pip_id in pipelines.keys():
+                pipeline = pipelines[pip_id]
+                [_, distance_list] = pipeline.vehicles
+                if len(distance_list) == 0:
+                    continue
+                [x_list, y_list] = self._get_coordinates(link_id, pip_id, link_pos_list=distance_list)
+                connected_x += x_list
+                connected_y += y_list
+        plt.plot(connected_x, connected_y, "b.")
+        # plt.axis("off")
+        plt.tight_layout()
+        plt.text(1900, 0, "Plymouth Rd. Real-Time Traffic     Time step " + str(self.time_step), fontsize=14)
+        plt.savefig(os.path.join(env_config.output_particle_folder, "full" + str(int(self.time_step))) + ".png",
+                    dpi=300)
+        plt.xlim([2915, 3500])
+        plt.ylim([890, 1155])
+
+        plt.text(3280, 900, "Plymouth Rd/Green Real-Time Traffic    Time step " + str(self.time_step), fontsize=12)
+        plt.savefig(os.path.join(env_config.output_particle_folder, "zoom" + str(int(self.time_step))) + ".png",
+                    dpi=300)
+        plt.close()
+
+    def _get_coordinates(self, link_id, pip_id, link_pos_list):
+        link = self.links[link_id]
+        pipeline = link.pipelines[pip_id]
+        lane_list = pipeline.lane_list
+
+        x_list = []
+        y_list = []
+        for dis in link_pos_list:
+            pip_dis = dis - pipeline.start_dis
+            for lane_id in lane_list:
+                lane = self.lanes[lane_id]
+                if pip_dis < lane.length:
+                    x, y = self._get_specific_location(lane.shape[0], lane.shape[1], pip_dis)
+                    if x is None:
+                        continue
+                    x_list.append(x)
+                    y_list.append(y)
+                    continue
+                pip_dis -= lane.length
+        return [x_list, y_list]
+
+    @staticmethod
+    def _get_specific_location(x_list, y_list, length):
+        x_diff = np.abs(np.diff(x_list))
+        y_diff = np.abs(np.diff(y_list))
+        distance_list = np.sqrt(np.square(x_diff) + np.square(y_diff))
+        for idx in range(len(distance_list)):
+            local_length = distance_list[idx]
+            if local_length >= length:
+                proportion = length / local_length
+                x = x_list[idx] * (1 - proportion) + x_list[idx + 1] * proportion
+                y = y_list[idx] * (1 - proportion) + y_list[idx + 1] * proportion
+                return x, y
+            else:
+                length -= local_length
+        return None, None
+
 
 class ParticleLink(Link):
     def __init__(self):
@@ -638,10 +714,12 @@ class ParticleLink(Link):
                         last_distance = downstream_dis[direction_flag][pdx]
                     new_location_list = \
                         self.car_following.sample_next_locations(location_list + [last_distance], None, 1)
+
                     self.pipelines[pip_id].particles[cv_id][pdx][0] = new_location_list
 
                     exit_length = pipeline.exit_length[direction_flag]
                     outreach_length = new_location_list[-1] - exit_length
+
                     # put the vehicle to out flow
                     if outreach_length > 0:
                         self.pipelines[pip_id].outflow[direction_flag][pdx] = outreach_length
@@ -821,3 +899,4 @@ class PipeLine(object):
         for ip in range(len(particle1)):
             new_particle.append([particle1[ip][0] + particle2[ip][0], particle1[ip][1] + particle2[ip][1]])
         return new_particle
+

@@ -60,6 +60,7 @@ buffer_network_xml = os.path.join(sumo_configuration_buffer_folder, network_xml_
 copyfile(network_xml_file_template, buffer_network_xml)
 
 output_figure_folder = "output/figs"
+output_particle_folder = "output/particle"
 output_trajs_folder = "output/trajs"
 output_data_folder = "output/data"
 output_observation_mapping_file = "sumo/observation_guidance.json"
