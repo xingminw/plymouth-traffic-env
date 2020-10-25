@@ -7,9 +7,9 @@ class DeterministicSimplifiedModel(object):
 
     """
     def __init__(self):
-        self.free_flow_speed = 15
-        self.jam_density = 7
-        self.free_density = 50
+        self.free_flow_speed = 15               # free flow speed
+        self.jam_density = 7                    # jam density
+        self.free_density = 30                  #
 
     def _get_mean(self, headway):
         """
@@ -17,6 +17,8 @@ class DeterministicSimplifiedModel(object):
         :param headway:
         :return:
         """
+        if headway < -2:
+            return self.free_flow_speed
         if headway <= self.jam_density:
             return 0
         elif headway <= self.free_density:

@@ -1038,6 +1038,7 @@ class SignalizedNetwork(gym.Env, ABC):
                 lane_id = lane_attrib["id"]
                 lane = Lane(lane_id, edge_id)
                 lane.length = float(lane_attrib["length"])
+                lane.speed = float(lane_attrib["speed"])
                 lane.upstream_junction = edge.upstream_junction
                 lane.downstream_junction = edge.downstream_junction
 
@@ -1198,6 +1199,7 @@ class SignalizedNetwork(gym.Env, ABC):
             maximum_lanes = 0
             minimum_lanes = 10
 
+            overall_speed_list = []
             for edge_id in link.edge_list:
                 edge = self.edges[edge_id]
                 edge_shape = edge.shape
@@ -1206,9 +1208,12 @@ class SignalizedNetwork(gym.Env, ABC):
                 link_length += edge.length
 
                 lane_number = len(edge.lanes_list)
+                speed_list = [self.lanes[val].speed for val in edge.lanes_list]
+                overall_speed_list += speed_list
                 maximum_lanes = max(maximum_lanes, lane_number)
                 minimum_lanes = min(minimum_lanes, lane_number)
 
+            self.links[link_id].speed = np.average(overall_speed_list)
             self.links[link_id].shape = link_shape
             self.links[link_id].length = link_length
             self.links[link_id].cell_number = int(np.ceil(link_length / self._resolution)) + 1
@@ -1736,6 +1741,7 @@ class Link(object):
         :param observed_stopped: observed stop density matrix
         :param observed_density: observed density matrix
         """
+        self.speed = None
         self.maximum_lane_number = maximum_lane_number
         self.minimum_lane_number = minimum_lane_number
         self.cell_number = cell_number
