@@ -48,7 +48,7 @@ class EstimatedNetwork(SignalizedNetwork, ABC):
         SignalizedNetwork.__init__(self)
 
         # number of particles
-        self.particle_number = 1
+        self.particle_number = 50
 
         # load demand and turning ratio
         demand_dict, turning_dict = self._load_demand_and_turning_ratio()
@@ -216,7 +216,7 @@ class EstimatedNetwork(SignalizedNetwork, ABC):
                         if outflow_flag:
                             if outflow[direction][ip] is not None:
                                 self.links[downstream_links[i_dir]].pipelines[downstream_pip_id].upstream_arrival[
-                                    ip] = outflow[direction][ip] - 1
+                                    ip] = outflow[direction][ip] + 1
 
                         # if the signal is green
                         if signal_state:
@@ -343,7 +343,7 @@ class EstimatedNetwork(SignalizedNetwork, ABC):
                     new_pipeline_dict[pipeline_id].movement.append(int(downstream_info["link_id"]))
                     new_pipeline_dict[pipeline_id].tail_length.append(internal_length)
                     new_pipeline_dict[pipeline_id].exit_length[downstream_info["dir"]] = \
-                        new_pipeline_dict[pipeline_id].length + internal_length
+                        link.length + internal_length
 
             # load the new pipeline object to the link
             self.links[link_id].pipelines = new_pipeline_dict
@@ -782,7 +782,7 @@ class ParticleLink(Link):
         for pip_id in self.pipelines.keys():
             pipeline = self.pipelines[pip_id]
             [_, cv_distance] = pipeline.vehicles
-            vehicles_locations = [deepcopy(cv_distance)] * particle_number
+            vehicles_locations = [deepcopy(cv_distance) for val in range(particle_number)]
             particles = pipeline.particles
             for cv_id in particles.keys():
                 cv_particles = particles[cv_id]
@@ -834,7 +834,6 @@ class ParticleLink(Link):
         # stochastic car-following model
         for pip_id in self.pipelines.keys():
             pipeline = self.pipelines[pip_id]
-
             particles = pipeline.particles
             direction = pipeline.direction
             pipeline.outflow = {}
@@ -917,8 +916,8 @@ class ParticleLink(Link):
                             location_list = location_list[:-1]
                             lane_change_list = lane_change_list[:-1]
 
-                    self.pipelines[pip_id].particles[cv_id][pdx] = [new_location_list, new_lane_change_list]
-                    continue
+                    # self.pipelines[pip_id].particles[cv_id][pdx] = [new_location_list, new_lane_change_list]
+                    # continue
 
                     latest_locations = []
                     latest_lane_infos = []
@@ -957,14 +956,14 @@ class ParticleLink(Link):
                         [destination_cv, destination_dis] = destination_pipeline.vehicles
                         if spillover:
                             latest_locations.append(location_list[::-1][i_v])
-                            latest_lane_infos.append(location_list[::-1][i_v])
+                            latest_lane_infos.append(lane_change_list[::-1][i_v])
                             continue
                         else:
                             downstream_spillover = destination_pipeline.spillover[pdx]
                             if downstream_spillover:
                                 spillover = True
                                 latest_locations.append(location_list[::-1][i_v])
-                                latest_lane_infos.append(location_list[::-1][i_v])
+                                latest_lane_infos.append(lane_change_list[::-1][i_v])
                                 continue
                             else:
                                 # directly move the vehicle to the destination link
