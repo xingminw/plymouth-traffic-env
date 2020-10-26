@@ -83,7 +83,7 @@ class EstimatedNetwork(SignalizedNetwork, ABC):
             # self.links[link_id].resample(self.time_step)
 
             # left-turn spillover
-            # self.links[link_id].convert_coordinates(self.particle_number)
+            self.links[link_id].convert_coordinates(self.particle_number)
         self.link_communication()
 
     def _close_simulator(self):
@@ -113,7 +113,7 @@ class EstimatedNetwork(SignalizedNetwork, ABC):
 
         for link_id in self.links.keys():
             link = self.links[link_id]
-            if link.link_type == "wrong":
+            if link.link_type == "wrong" or link.link_type == "sink":
                 continue
 
             pipelines = link.pipelines
@@ -124,8 +124,9 @@ class EstimatedNetwork(SignalizedNetwork, ABC):
                 pipeline = pipelines[pip_id]
 
                 plt.subplot(2, 2, count + 1)
-                plt.title("Lane " + str(pipeline.id[-1]) + " " + pipeline.direction)
-
+                plt.title("Lane " + str(pipeline.id[-1]) + ", " + pipeline.direction +
+                          ", " + str(np.round(pipeline.arrival_rate, 4)))
+                plt.plot([0, self.time_step], [pipeline.start_dis, pipeline.start_dis], "k--")
                 signal = pipeline.signal
                 movement = pipeline.movement
                 directions = pipeline.direction
@@ -260,6 +261,8 @@ class EstimatedNetwork(SignalizedNetwork, ABC):
                 pipeline = PipeLine(lane_list[-1], lane_list, self.particle_number)
                 pipeline.length = pipeline_length
                 pipeline.start_dis = link.length - pipeline_length
+                if pipeline.start_dis < 5:
+                    link.external_arrival_lanes += 1
                 new_pipeline_dict[pipeline.id] = pipeline
 
             # there is one abnormal
@@ -371,6 +374,17 @@ class EstimatedNetwork(SignalizedNetwork, ABC):
                     downstream_links.append(downstream_link)
                 self.links[link_id].pipelines[pip_id].downstream_pipelines = downstream_pips
                 self.links[link_id].pipelines[pip_id].downstream_links = downstream_links
+
+        # set the arrival rate for each pipeline
+        for link_id in self.links.keys():
+            link = self.links[link_id]
+            pipelines = link.pipelines
+            if link.link_type != "source":
+                continue
+            for pip_id in pipelines.keys():
+                pipeline = pipelines[pip_id]
+                if pipeline.start_dis < 5:
+                    pipeline.arrival_rate = link.particle_arrival / link.external_arrival_lanes
 
     @staticmethod
     def _load_demand_and_turning_ratio():
@@ -676,6 +690,7 @@ class ParticleLink(Link):
         self.link_type = None
         self.lane_change_events = None
 
+        self.external_arrival_lanes = 0
         self.ingress_lanes = None
         self.demand = None
         self.particle_arrival = None
@@ -698,6 +713,7 @@ class ParticleLink(Link):
         self.left_turn = 0
         self.right_turn = 0
 
+        self.external_arrival_lanes = 0
         self.left_pipelines = []
         self.right_pipelines = []
         self.through_pipelines = []
@@ -744,7 +760,7 @@ class ParticleLink(Link):
 
             # if there is no new arrival cv, then generate the arrival for particle
             if not new_arrival:
-                self.pipelines[pip_id].generate_new_arrival(self.particle_arrival, self.turning_info)
+                self.pipelines[pip_id].generate_new_arrival(self.turning_info)
             else:
                 # update the pipeline particle accordingly
                 self.pipelines[pip_id].new_cv_arrived(cv_list[0], cv_distance_list[0])
@@ -763,26 +779,25 @@ class ParticleLink(Link):
             self.pipelines[pip_id].save_particle(time_step)
 
     def convert_coordinates(self, particle_number):
-        # get the spill over state
         for pip_id in self.pipelines.keys():
             pipeline = self.pipelines[pip_id]
+            [_, cv_distance] = pipeline.vehicles
+            vehicles_locations = [deepcopy(cv_distance)] * particle_number
             particles = pipeline.particles
-            vehicles = pipeline.vehicles
-            [_, cv_distance_list] = vehicles
-            vehicle_location_list = [cv_distance_list] * particle_number
-
-            count = 0
             for cv_id in particles.keys():
-                local_particle = particles[cv_id]
-                for pdx in range(len(local_particle)):
-                    particle = local_particle[pdx]
-                    [distance_list, _] = particle
-                    vehicle_location_list[pdx] += distance_list
-                count += 1
-            vehicle_numbers = [len(val) for val in vehicle_location_list]
-            maximum_contains = pipeline.length / 7 + 2
-            print(pipeline.direction, pipeline.length, pipeline.start_dis)
-            print("vehicle loc", vehicle_location_list)
+                cv_particles = particles[cv_id]
+                for ip in range(particle_number):
+                    [locs, _] = cv_particles[ip]
+                    vehicles_locations[ip] += locs
+            vehicles_nums = [len(val) for val in vehicles_locations]
+            maximum_nums = max(pipeline.length / 7 - 3, 3)
+            spillover = [val > maximum_nums for val in vehicles_nums]
+            spillover_prob = np.average(spillover)
+            if spillover_prob > 0.5:
+                print("spillover alert", pipeline.length, self.link_id, vehicles_nums)
+            pipeline.spillover = spillover
+            pipeline.spillover_prob.append(spillover_prob)
+            # print(self.pipelines[pip_id].spillover_prob)
 
     def sort_lane_changing_events(self):
         if len(self.lane_change_events) <= 1:
@@ -902,14 +917,18 @@ class ParticleLink(Link):
                             location_list = location_list[:-1]
                             lane_change_list = lane_change_list[:-1]
 
+                    self.pipelines[pip_id].particles[cv_id][pdx] = [new_location_list, new_lane_change_list]
+                    continue
+
                     latest_locations = []
                     latest_lane_infos = []
 
+                    # deal with the lane change from the inverse direction
                     spillover = False
                     for i_v in range(len(new_location_list)):
-                        if spillover:
+                        if spillover:                         # if spill over occurs, there will be no lane changing
                             location = location_list[::-1][i_v]
-                            lane_change = location_list[::-1][i_v]
+                            lane_change = lane_change_list[::-1][i_v]
                         else:
                             location = new_location_list[::-1][i_v]
                             lane_change = new_lane_change_list[::-1][i_v]
@@ -935,37 +954,44 @@ class ParticleLink(Link):
                             latest_lane_infos.append(lane_change)
                             continue
 
-                        dest_direction = destination_pipeline.direction
-
                         [destination_cv, destination_dis] = destination_pipeline.vehicles
-                        if dest_direction == "l":
-                            if spillover:
-                                pass
-                            else:
-                                pass
+                        if spillover:
+                            latest_locations.append(location_list[::-1][i_v])
+                            latest_lane_infos.append(location_list[::-1][i_v])
+                            continue
                         else:
-                            # directly move the vehicle to the destination link
-                            insert_index = 0
-                            for i_dis in range(len(destination_dis)):
-                                if location > destination_dis[i_dis]:
-                                    insert_index = i_dis
-                                    break
-                            destination_cv_list = ["start"] + destination_cv
-                            insert_cv = destination_cv_list[insert_index]
-                            [dest_dis, dest_lane] = self.pipelines[dest_pip_id].particles[insert_cv][pdx]
-
-                            if len(dest_dis) == 0:
-                                new_dest_dis, new_dest_lane = [location], [lane_change]
+                            downstream_spillover = destination_pipeline.spillover[pdx]
+                            if downstream_spillover:
+                                spillover = True
+                                latest_locations.append(location_list[::-1][i_v])
+                                latest_lane_infos.append(location_list[::-1][i_v])
+                                continue
                             else:
+                                # directly move the vehicle to the destination link
                                 insert_index = 0
-                                for i_dis in range(len(dest_dis)):
-                                    if location < dest_dis[i_dis]:
+                                for i_dis in range(len(destination_dis)):
+                                    if location > destination_dis[i_dis]:
                                         insert_index = i_dis
                                         break
-                                new_dest_dis = dest_dis[:insert_index] + [location] + dest_dis[insert_index:]
-                                new_dest_lane = dest_lane[:insert_index] + [lane_change] + dest_lane[insert_index:]
-                            self.pipelines[dest_pip_id].particles[insert_cv][pdx] = [new_dest_dis, new_dest_lane]
-                    self.pipelines[pip_id].particles[cv_id][pdx] = [new_location_list, new_lane_change_list]
+                                destination_cv_list = ["start"] + destination_cv
+                                insert_cv = destination_cv_list[insert_index]
+                                [dest_dis, dest_lane] = self.pipelines[dest_pip_id].particles[insert_cv][pdx]
+
+                                if len(dest_dis) == 0:
+                                    new_dest_dis, new_dest_lane = [location], [lane_change]
+                                else:
+                                    insert_index = 0
+                                    for i_dis in range(len(dest_dis)):
+                                        if location < dest_dis[i_dis]:
+                                            insert_index = i_dis
+                                            break
+                                    new_dest_dis = dest_dis[:insert_index] + [location] + dest_dis[insert_index:]
+                                    new_dest_lane = dest_lane[:insert_index] + [lane_change] + dest_lane[
+                                                                                               insert_index:]
+
+                                self.pipelines[dest_pip_id].particles[insert_cv][pdx] = [new_dest_dis,
+                                                                                         new_dest_lane]
+                    self.pipelines[pip_id].particles[cv_id][pdx] = [latest_locations[::-1], latest_lane_infos[::-1]]
 
     def get_lane_belonged_pipeline(self, lane_id):
         for pip_id in self.pipelines.keys():
@@ -986,6 +1012,7 @@ class PipeLine(object):
         self.index = int(pipeline_id[-1])
         self.lane_list = lane_list
 
+        self.arrival_rate = 0
         self.length = None
         self.start_dis = None
         self.tail_length = None
@@ -1000,6 +1027,8 @@ class PipeLine(object):
         self.downstream_dis = None
         self.outflow = None
         self.upstream_arrival = None
+        self.spillover = False
+        self.spillover_prob = []
 
         # real-time state
         self.vehicles = [[], []]
@@ -1032,11 +1061,12 @@ class PipeLine(object):
             new_particles[ik] = self.particles[ik]
         self.particles = new_particles
 
-    def generate_new_arrival(self, arrival_rate, turning_info):
+    def generate_new_arrival(self, turning_info):
         [ratio_list, pip_list] = turning_info
 
+        arrival_rate = self.arrival_rate
         # generate the arrival series
-        if arrival_rate is not None:
+        if arrival_rate is not None and arrival_rate > 0:
             arrival_seeds = uniform.rvs(size=self.particle_number)
             arrival_list = [val < arrival_rate for val in arrival_seeds]
         else:
@@ -1050,7 +1080,7 @@ class PipeLine(object):
 
         for ip in range(self.particle_number):
             if arrival_list[ip]:
-                self.particles["start"][ip][0] = [arrival_list[ip] + 1] + self.particles["start"][ip][0]
+                self.particles["start"][ip][0] = [arrival_list[ip] - 1] + self.particles["start"][ip][0]
 
                 if turning_seeds[ip] < ratio_list[0]:
                     local_pips = [int(val[-1]) for val in pip_list[0]]
@@ -1064,6 +1094,7 @@ class PipeLine(object):
                     local_pips = [int(val[-1]) for val in pip_list[2]]
                     chosen_pip = local_pips[pip_seeds[ip] % len(local_pips)]
                     direction = "r"
+
                 # the vehicle will only turn when necessary
                 if not (direction in self.direction):
                     self.particles["start"][ip][1] = [chosen_pip] + self.particles["start"][ip][1]
