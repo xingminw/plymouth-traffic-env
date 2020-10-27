@@ -9,7 +9,9 @@ class DeterministicSimplifiedModel(object):
     def __init__(self):
         self.free_flow_speed = 15               # free flow speed
         self.jam_density = 7                    # jam density
-        self.free_density = 30                  #
+        self.free_density = 30
+        self.maximum_sigma = 5
+        self.minimum_sigma = 2
 
     def _get_mean(self, headway):
         """
@@ -46,6 +48,18 @@ class DeterministicSimplifiedModel(object):
         speed_list = self._get_speed_list(location_list)
         new_locations = np.array(location_list[:-1]) + time_interval * np.array(speed_list)
         return new_locations.tolist()
+
+    def get_weight(self, headway, speed):
+        if speed > self.free_flow_speed:
+            std_val = self.maximum_sigma
+        elif speed <= 0:
+            std_val = self.minimum_sigma
+        else:
+            proportion = speed / self.free_flow_speed
+            std_val = proportion * self.maximum_sigma + (1 - proportion) * self.minimum_sigma
+        mean_speed = self._get_mean(headway)
+        weight = norm.pdf(speed, mean_speed, std_val) * 100
+        return weight
 
 
 class StochasticNewellCarFollowing(object):

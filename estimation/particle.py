@@ -1,8 +1,6 @@
 """
 inherit the whole class of traffic env and add a particle filter estimation part
 
-TODO 1: link the upstream and downstream...
-TODO 2: add lane changing
 TODO 3: visualization !!! (images->video)
 
 TODO (others): add parallel computing..., there is an error about the cv sequence, Plymouth E, 218 219
@@ -48,7 +46,7 @@ class EstimatedNetwork(SignalizedNetwork, ABC):
         SignalizedNetwork.__init__(self)
 
         # number of particles
-        self.particle_number = 50
+        self.particle_number = 200
 
         # load demand and turning ratio
         demand_dict, turning_dict = self._load_demand_and_turning_ratio()
@@ -80,7 +78,7 @@ class EstimatedNetwork(SignalizedNetwork, ABC):
     def particle_filter(self):
         for link_id in self.links.keys():
             self.links[link_id].particle_forward(self.time_step)
-            # self.links[link_id].resample(self.time_step)
+            self.links[link_id].resample(self.particle_number)
 
             # left-turn spillover
             self.links[link_id].convert_coordinates(self.particle_number)
@@ -778,6 +776,82 @@ class ParticleLink(Link):
         for pip_id in self.pipelines.keys():
             self.pipelines[pip_id].save_particle(time_step)
 
+    def resample(self, particle_number):
+        if self.link_type == "wrong" or self.link_type == "sink":
+            return
+        for pip_id in self.pipelines.keys():
+            pipeline = self.pipelines[pip_id]
+            [cv_list, cv_dis] = pipeline.vehicles
+            [pr_cv_list, pr_cv_dis] = pipeline.previous_vehicles
+
+            cv_dis_dict = {}
+            for iv in range(len(cv_list)):
+                cv_dis_dict[cv_list[iv]] = cv_dis[iv]
+            pr_dis_dict = {}
+            for iv in range(len(pr_cv_list)):
+                pr_dis_dict[pr_cv_list[iv]] = pr_cv_dis[iv]
+
+            # determine the weight of the particles
+            particle_weights = [1 for temp in range(particle_number)]
+            exit_length = np.min([pipeline.exit_length[val] for val in pipeline.exit_length.keys()] + [10000])
+
+            particles = pipeline.particles
+            vehicle_list = list(particles.keys())[1:] + ["end"]
+            pr_dis_dict["end"] = exit_length
+
+            if len(vehicle_list) <= 2:
+                continue
+            for vid in range(len(vehicle_list) - 1):
+                local_vid = vehicle_list[vid]
+                if not (local_vid in cv_list):
+                    continue
+                next_vid = vehicle_list[vid + 1]
+                particle = particles[local_vid]
+
+                cv_headway = pr_dis_dict[next_vid] - pr_dis_dict[local_vid]
+                following_speed = cv_dis_dict[local_vid] - pr_dis_dict[local_vid]
+
+                for pdx in range(particle_number):
+                    [locations, _] = particle[pdx]
+                    if len(locations) > 1:
+                        headway = locations[0] - pr_dis_dict[local_vid]
+                    else:
+                        headway = cv_headway
+                    local_weight = self.car_following.get_weight(headway, following_speed)
+                    particle_weights[pdx] *= local_weight
+
+            resampled_particle = self.get_resample_particle(particle_weights)
+            new_particles = {}
+            for vid in particles.keys():
+                if not (vid in new_particles.keys()):
+                    new_particles[vid] = []
+                for pdx in range(particle_number):
+                    new_particles[vid].append(particles[vid][resampled_particle[pdx]])
+            pipeline.particles = new_particles
+
+    @staticmethod
+    def get_resample_particle(particle_weights):
+        # normalize the weight
+        total_weights = np.sum(particle_weights)
+
+        weight_list = [val / total_weights for val in particle_weights]
+        cdf_curve = np.cumsum(weight_list)
+
+        # re-sample
+        random_number = uniform.rvs()
+        new_particles = []
+
+        sample_size = len(particle_weights)
+
+        for idx in range(sample_size):
+            current_val = (random_number + idx) / sample_size
+            for jdx in range(len(cdf_curve)):
+                current_weight = cdf_curve[jdx]
+                if current_weight >= current_val:
+                    new_particles.append(jdx)
+                    break
+        return new_particles
+
     def convert_coordinates(self, particle_number):
         for pip_id in self.pipelines.keys():
             pipeline = self.pipelines[pip_id]
@@ -794,7 +868,8 @@ class ParticleLink(Link):
             spillover = [val > maximum_nums for val in vehicles_nums]
             spillover_prob = np.average(spillover)
             if spillover_prob > 0.5:
-                print("spillover alert", pipeline.length, self.link_id, vehicles_nums)
+                # print("spillover alert", pipeline.length, self.link_id, vehicles_nums)
+                pass
             pipeline.spillover = spillover
             pipeline.spillover_prob.append(spillover_prob)
             # print(self.pipelines[pip_id].spillover_prob)
