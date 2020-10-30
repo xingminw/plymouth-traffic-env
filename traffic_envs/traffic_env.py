@@ -1037,6 +1037,13 @@ class SignalizedNetwork(gym.Env, ABC):
                 lane_attrib = subsubroot.attrib
                 lane_id = lane_attrib["id"]
                 lane = Lane(lane_id, edge_id)
+
+                lane.allowable = True
+                if "disallow" in lane_attrib.keys():
+                    forbidden = lane_attrib["disallow"] == "all"
+                    if forbidden:
+                        lane.allowable = False
+
                 lane.length = float(lane_attrib["length"])
                 lane.speed = float(lane_attrib["speed"])
                 lane.upstream_junction = edge.upstream_junction
@@ -1402,6 +1409,7 @@ class SignalizedNetwork(gym.Env, ABC):
             segment_edge_list = [[edge_list[0]]]
             pipeline_lane_list = [[val] for val in self.edges[edge_list[0]].lanes_list]
             segment_cursor = 0
+
             for idx in range(len(edge_list) - 1):
                 local_edge_id = edge_list[idx]
                 local_edge = self.edges[local_edge_id]
@@ -1483,6 +1491,13 @@ class SignalizedNetwork(gym.Env, ABC):
         :param downstream_edge_id:
         :return:
         """
+        # TODO: hard code part....
+        if upstream_edge_id == "441142714#2":
+            return 0
+
+        if upstream_edge_id == "-441190764#1":
+            return 0
+
         upstream_lanes = self.edges[upstream_edge_id].lanes_list
         downstream_lanes = self.edges[downstream_edge_id].lanes_list
 
@@ -1576,6 +1591,7 @@ class Lane(object):
         self.edge_id = edge_id
         self.speed = speed
         self.length = length
+        self.allowable = True
         self.shape = shape
         self.downstream_junction = downstream_junction
         self.upstream_junction = upstream_junction

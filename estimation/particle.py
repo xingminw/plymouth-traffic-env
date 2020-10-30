@@ -1,10 +1,5 @@
 """
 inherit the whole class of traffic env and add a particle filter estimation part
-
-TODO 3: visualization !!! (images->video)
-
-TODO (others): add parallel computing..., there is an error about the cv sequence, Plymouth E, 218 219
-
 """
 
 from abc import ABC
@@ -46,7 +41,7 @@ class EstimatedNetwork(SignalizedNetwork, ABC):
         SignalizedNetwork.__init__(self)
 
         # number of particles
-        self.particle_number = 200
+        self.particle_number = 500
 
         # load demand and turning ratio
         demand_dict, turning_dict = self._load_demand_and_turning_ratio()
@@ -120,7 +115,8 @@ class EstimatedNetwork(SignalizedNetwork, ABC):
             count = 0
             for pip_id in pipelines.keys():
                 pipeline = pipelines[pip_id]
-
+                print(pipeline.lane_list)
+                print([self.lanes[val].allowable for val in pipeline.lane_list])
                 plt.subplot(2, 2, count + 1)
                 plt.title("Lane " + str(pipeline.id[-1]) + ", " + pipeline.direction +
                           ", " + str(np.round(pipeline.arrival_rate, 4)))
@@ -255,7 +251,8 @@ class EstimatedNetwork(SignalizedNetwork, ABC):
                 pipeline_length = 0
                 for lane_id in lane_list:
                     lane = self.lanes[lane_id]
-                    pipeline_length += lane.length
+                    if lane.allowable:
+                        pipeline_length += lane.length
                 pipeline = PipeLine(lane_list[-1], lane_list, self.particle_number)
                 pipeline.length = pipeline_length
                 pipeline.start_dis = link.length - pipeline_length
@@ -821,6 +818,7 @@ class ParticleLink(Link):
                     particle_weights[pdx] *= local_weight
 
             resampled_particle = self.get_resample_particle(particle_weights)
+            print(len(resampled_particle), resampled_particle)
             new_particles = {}
             for vid in particles.keys():
                 if not (vid in new_particles.keys()):
@@ -833,6 +831,9 @@ class ParticleLink(Link):
     def get_resample_particle(particle_weights):
         # normalize the weight
         total_weights = np.sum(particle_weights)
+        if total_weights < 1e-6:
+            return range(len(particle_weights))
+        print(total_weights, len(particle_weights))
 
         weight_list = [val / total_weights for val in particle_weights]
         cdf_curve = np.cumsum(weight_list)
@@ -936,11 +937,11 @@ class ParticleLink(Link):
                     self.pipelines[pip_id].particles = new_particles
                     particle_keys = new_keys_list
                 else:
-                    # print("\n report error information")
-                    # print(self.link_id, pip_id, "not consistent")
-                    # print(cv_list, cv_distance_list)
-                    # print(particle_keys[1:])
-                    # print(self.lane_change_events)
+                    print("\n report error information")
+                    print(self.link_id, pip_id, "not consistent")
+                    print(cv_list, cv_distance_list)
+                    print(particle_keys[1:])
+                    print(self.lane_change_events)
                     exit("not consistent error!")
 
             for i_p in range(len(cv_list) + 1):

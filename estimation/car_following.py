@@ -10,8 +10,8 @@ class DeterministicSimplifiedModel(object):
         self.free_flow_speed = 15               # free flow speed
         self.jam_density = 7                    # jam density
         self.free_density = 30
-        self.maximum_sigma = 5
-        self.minimum_sigma = 2
+        self.maximum_sigma = 3
+        self.minimum_sigma = 0.8
 
     def _get_mean(self, headway):
         """
