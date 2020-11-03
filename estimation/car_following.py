@@ -10,8 +10,11 @@ class SimplifiedModel(object):
         self.free_flow_speed = 15               # free flow speed
         self.jam_density = 7                    # jam density
         self.free_density = 30
-        self.maximum_sigma = 3
+        self.maximum_sigma = 2
         self.minimum_sigma = 0.8
+
+        self.particle_sigma_max = 10
+        self.particle_sigma_min = 1
 
     def _get_mean(self, headway):
         """
@@ -25,20 +28,28 @@ class SimplifiedModel(object):
             return 0
         elif headway <= self.free_density:
             proportion = (headway - self.jam_density) / (self.free_density - self.jam_density)
-            variance = proportion * self.maximum_sigma
-            offset = norm.rvs(0, variance, 1)[0]
-            mean_speed = proportion * self.free_flow_speed + offset
-
+            mean_speed = proportion * self.free_flow_speed
             return mean_speed
         elif headway > self.free_density:
-            offset = norm.rvs(0, self.maximum_sigma, 1)[0]
-            return self.free_flow_speed + offset
+            return self.free_flow_speed
         else:
             print("check the error, the headway is:", headway)
 
+    def _get_disturbed_speed(self, headway):
+        mean_speed = self._get_mean(headway)
+        if headway <= self.jam_density:
+            offset = 0
+        elif headway < self.free_density:
+            proportion = (headway - self.jam_density) / (self.free_density - self.jam_density)
+            variance = proportion * self.maximum_sigma
+            offset = norm.rvs(0, variance, 1)[0]
+        else:
+            offset = norm.rvs(0, self.maximum_sigma, 1)[0]
+        return mean_speed + offset
+
     def _get_speed_list(self, location_list):
         headway_list = np.diff(location_list)
-        speed_list = [self._get_mean(val) for val in headway_list]
+        speed_list = [self._get_disturbed_speed(val) for val in headway_list]
         return speed_list
 
     def sample_next_locations(self, location_list, _, time_interval):
@@ -55,14 +66,18 @@ class SimplifiedModel(object):
 
     def get_weight(self, headway, speed):
         if speed > self.free_flow_speed:
-            std_val = self.maximum_sigma
+            std_val = self.particle_sigma_max
         elif speed <= 0:
-            std_val = self.minimum_sigma
+            std_val = self.particle_sigma_min
         else:
             proportion = speed / self.free_flow_speed
-            std_val = proportion * self.maximum_sigma + (1 - proportion) * self.minimum_sigma
+            std_val = proportion * self.particle_sigma_max + (1 - proportion) * self.particle_sigma_min
         mean_speed = self._get_mean(headway)
+        # print()
+        # print("real speed", speed, "std val", std_val, "expected speed", mean_speed)
         weight = norm.pdf(speed, mean_speed, std_val) * 100
+        # print("weight calculation:", "headway", headway, "speed", speed,
+        #       "desired speed", mean_speed, "weight", weight)
         return weight
 
 

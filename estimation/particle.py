@@ -41,7 +41,7 @@ class EstimatedNetwork(SignalizedNetwork, ABC):
         SignalizedNetwork.__init__(self)
 
         # number of particles
-        self.particle_number = 500
+        self.particle_number = 200
 
         # load demand and turning ratio
         demand_dict, turning_dict = self._load_demand_and_turning_ratio()
@@ -144,8 +144,9 @@ class EstimatedNetwork(SignalizedNetwork, ABC):
                 particle_s = []
                 for itime in particles.keys():
                     locations = particles[itime]
-                    particle_t += [itime] * len(locations)
-                    particle_s += locations
+                    for val in locations:
+                        particle_t += [itime] * len(val)
+                        particle_s += val
 
                 for vid in cv_trajs.keys():
                     [vt, vd] = cv_trajs[vid]
@@ -163,7 +164,7 @@ class EstimatedNetwork(SignalizedNetwork, ABC):
 
             plt.suptitle(overall_title)
             plt.savefig(os.path.join(folder, overall_title + ".png"), dpi=300)
-            # plt.show()
+            plt.show()
             plt.close()
             print("Output", overall_title, "done")
 
@@ -171,7 +172,6 @@ class EstimatedNetwork(SignalizedNetwork, ABC):
         """
         update the downstream constraints
 
-        TODO: the right-turn movement did not consider the potential conflict
         :return:
         """
         # initiate and clean the upstream arrival
@@ -594,56 +594,6 @@ class EstimatedNetwork(SignalizedNetwork, ABC):
         for link_id in self.links.keys():
             self.links[link_id].update_turning_dict()
 
-    def _output_particle_posterior(self):
-        plt.figure(figsize=[13, 7])
-        for edge_id in self.edges.keys():
-            edge = self.edges[edge_id]
-            for lane_id in edge.lanes_list:
-                plt.plot(self.lanes[lane_id].shape[0], self.lanes[lane_id].shape[1], "k-", lw=1, alpha=0.5)
-        if not os.path.exists(env_config.output_particle_folder):
-            os.mkdir(env_config.output_particle_folder)
-
-        # add the connected vehicles
-        connected_x = []
-        connected_y = []
-
-        particle_x = []
-        particle_y = []
-
-        # add the particles
-        for link_id in self.links.keys():
-            link = self.links[link_id]
-            pipelines = link.pipelines
-            for pip_id in pipelines.keys():
-                pipeline = pipelines[pip_id]
-                if (self.time_step - 1) in pipeline.particle_history.keys():
-                    particle_location = pipeline.particle_history[self.time_step - 1]
-                    if len(particle_location) > 0:
-                        [x_list, y_list] = self._get_coordinates(link_id, pip_id, link_pos_list=particle_location)
-                        particle_x += x_list
-                        particle_y += y_list
-                [_, distance_list] = pipeline.vehicles
-                if len(distance_list) == 0:
-                    continue
-                [x_list, y_list] = self._get_coordinates(link_id, pip_id, link_pos_list=distance_list)
-                connected_x += x_list
-                connected_y += y_list
-
-        plt.plot(connected_x, connected_y, "b.")
-        plt.plot(particle_x, particle_y, "r.")
-        # plt.axis("off")
-        plt.tight_layout()
-        plt.text(1900, 0, "Plymouth Rd. Real-Time Traffic     Time step " + str(self.time_step), fontsize=14)
-        plt.savefig(os.path.join(env_config.output_particle_folder, "full" + str(int(self.time_step))) + ".png",
-                    dpi=300)
-        plt.xlim([2915, 3500])
-        plt.ylim([890, 1155])
-
-        plt.text(3280, 900, "Plymouth Rd/Green Real-Time Traffic    Time step " + str(self.time_step), fontsize=12)
-        plt.savefig(os.path.join(env_config.output_particle_folder, "zoom" + str(int(self.time_step))) + ".png",
-                    dpi=300)
-        plt.close()
-
     def _get_coordinates(self, link_id, pip_id, link_pos_list):
         link = self.links[link_id]
         pipeline = link.pipelines[pip_id]
@@ -821,19 +771,24 @@ class ParticleLink(Link):
                     local_weight = self.car_following.get_weight(headway, following_speed)
                     particle_weights[pdx] *= local_weight
 
-            resampled_particle = self.get_resample_particle(particle_weights)
+            resampled_sequence = self.get_resample_particle(particle_weights)
+
             new_particles = {}
             for vid in particles.keys():
                 if not (vid in new_particles.keys()):
                     new_particles[vid] = []
                 for pdx in range(particle_number):
-                    new_particles[vid].append(particles[vid][resampled_particle[pdx]])
+                    new_particles[vid].append(particles[vid][resampled_sequence[pdx]])
+
+            # backward update for the particle history
+            pipeline.particle_history_backward_update(resampled_sequence)
             pipeline.particles = new_particles
 
     @staticmethod
     def get_resample_particle(particle_weights):
         # normalize the weight
         total_weights = np.sum(particle_weights)
+        # print("total weights", total_weights)
         if total_weights < 1e-6:
             return range(len(particle_weights))
 
@@ -1248,11 +1203,30 @@ class PipeLine(object):
 
     def save_particle(self, time_step):
         particles = self.particles
-        location_list = []
+        location_list = [[] for fvd in range(self.particle_number)]
         for fvd in particles.keys():
-            for particle in particles[fvd]:
-                location_list += particle[0]
+            for ip in range(self.particle_number):
+                current_locs = particles[fvd][ip]
+                location_list[ip] += current_locs[0]
         self.particle_history[time_step] = location_list
+
+    def particle_history_backward_update(self, new_sequence, backward_duration=-1):
+        history_times = list(self.particle_history.keys())
+        if backward_duration > 0:
+            correct_times = history_times[max(len(history_times) - backward_duration, 0):]
+        else:
+            correct_times = history_times
+        update_dict = {}
+        for co_t in correct_times:
+            original_locations = self.particle_history[co_t]
+            new_locations = []
+            for ip in range(self.particle_number):
+                new_locations.append(original_locations[new_sequence[ip]])
+            update_dict[co_t] = new_locations
+
+        # update the new history
+        for i_t in update_dict.keys():
+            self.particle_history[i_t] = update_dict[i_t]
 
     @staticmethod
     def merge(particle1, particle2):
