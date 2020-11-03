@@ -2,7 +2,7 @@ import numpy as np
 from scipy.stats import norm
 
 
-class DeterministicSimplifiedModel(object):
+class SimplifiedModel(object):
     """
 
     """
@@ -25,10 +25,14 @@ class DeterministicSimplifiedModel(object):
             return 0
         elif headway <= self.free_density:
             proportion = (headway - self.jam_density) / (self.free_density - self.jam_density)
-            mean_speed = proportion * self.free_flow_speed
+            variance = proportion * self.maximum_sigma
+            offset = norm.rvs(0, variance, 1)[0]
+            mean_speed = proportion * self.free_flow_speed + offset
+
             return mean_speed
         elif headway > self.free_density:
-            return self.free_flow_speed
+            offset = norm.rvs(0, self.maximum_sigma, 1)[0]
+            return self.free_flow_speed + offset
         else:
             print("check the error, the headway is:", headway)
 

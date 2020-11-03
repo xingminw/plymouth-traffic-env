@@ -5,7 +5,7 @@ inherit the whole class of traffic env and add a particle filter estimation part
 from abc import ABC
 from scipy.stats import uniform
 from copy import deepcopy
-from estimation.car_following import DeterministicSimplifiedModel
+from estimation.car_following import SimplifiedModel
 from traffic_envs.traffic_env import SignalizedNetwork, Link
 from traffic_envs.utils import\
     generate_new_route_configuration, delete_buffer_file
@@ -99,7 +99,6 @@ class EstimatedNetwork(SignalizedNetwork, ABC):
         delete_buffer_file(self.sumo_seed)
 
     def _output_particle_time_space(self):
-        # todo: output particle
         folder = env_config.output_trajs_folder
         if not os.path.exists(folder):
             os.mkdir(folder)
@@ -111,12 +110,12 @@ class EstimatedNetwork(SignalizedNetwork, ABC):
 
             pipelines = link.pipelines
 
-            plt.figure(figsize=[14, 9])
+            plt.figure(figsize=[19, 9])
             count = 0
             for pip_id in pipelines.keys():
                 pipeline = pipelines[pip_id]
-                print(pipeline.lane_list)
-                print([self.lanes[val].allowable for val in pipeline.lane_list])
+                # print(pipeline.lane_list)
+                # print([self.lanes[val].allowable for val in pipeline.lane_list])
                 plt.subplot(2, 2, count + 1)
                 plt.title("Lane " + str(pipeline.id[-1]) + ", " + pipeline.direction +
                           ", " + str(np.round(pipeline.arrival_rate, 4)))
@@ -160,8 +159,13 @@ class EstimatedNetwork(SignalizedNetwork, ABC):
                 plt.xlim([0, self.time_step])
                 plt.ylim([0, link.length + 20])
                 count += 1
-            plt.suptitle(link.link_id + "  " + link.link_type)
-            plt.show()
+            overall_title = link.link_id + "  " + link.link_type
+
+            plt.suptitle(overall_title)
+            plt.savefig(os.path.join(folder, overall_title + ".png"), dpi=300)
+            # plt.show()
+            plt.close()
+            print("Output", overall_title, "done")
 
     def link_communication(self):
         """
@@ -240,7 +244,7 @@ class EstimatedNetwork(SignalizedNetwork, ABC):
 
             pipelines = link.pipelines
             self.links[link_id].ingress_lanes = len(self.edges[link.edge_list[0]].lanes_list)
-            car_following_model = DeterministicSimplifiedModel()
+            car_following_model = SimplifiedModel()
             car_following_model.free_flow_speed = link.speed
             self.links[link_id].car_following = car_following_model
 
@@ -818,7 +822,6 @@ class ParticleLink(Link):
                     particle_weights[pdx] *= local_weight
 
             resampled_particle = self.get_resample_particle(particle_weights)
-            print(len(resampled_particle), resampled_particle)
             new_particles = {}
             for vid in particles.keys():
                 if not (vid in new_particles.keys()):
@@ -833,7 +836,6 @@ class ParticleLink(Link):
         total_weights = np.sum(particle_weights)
         if total_weights < 1e-6:
             return range(len(particle_weights))
-        print(total_weights, len(particle_weights))
 
         weight_list = [val / total_weights for val in particle_weights]
         cdf_curve = np.cumsum(weight_list)
@@ -865,7 +867,7 @@ class ParticleLink(Link):
                     [locs, _] = cv_particles[ip]
                     vehicles_locations[ip] += locs
             vehicles_nums = [len(val) for val in vehicles_locations]
-            maximum_nums = max(pipeline.length / 7 - 3, 3)
+            maximum_nums = pipeline.length / 7 + 2
             spillover = [val > maximum_nums for val in vehicles_nums]
             spillover_prob = np.average(spillover)
             if spillover_prob > 0.5:
