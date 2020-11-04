@@ -41,7 +41,10 @@ class EstimatedNetwork(SignalizedNetwork, ABC):
         SignalizedNetwork.__init__(self)
 
         # number of particles
-        self.particle_number = 200
+        self.particle_number = 3
+
+        # number of grid size
+        self.grid_size = 14
 
         # load demand and turning ratio
         demand_dict, turning_dict = self._load_demand_and_turning_ratio()
@@ -76,7 +79,7 @@ class EstimatedNetwork(SignalizedNetwork, ABC):
             self.links[link_id].resample(self.particle_number)
 
             # left-turn spillover
-            self.links[link_id].convert_coordinates(self.particle_number)
+            self.links[link_id].convert_coordinates(self.particle_number, self.grid_size)
         self.link_communication()
 
     def _close_simulator(self):
@@ -164,7 +167,55 @@ class EstimatedNetwork(SignalizedNetwork, ABC):
 
             plt.suptitle(overall_title)
             plt.savefig(os.path.join(folder, overall_title + ".png"), dpi=300)
-            plt.show()
+            # plt.show()
+            plt.close()
+
+            plt.figure(figsize=[19, 9])
+            count = 0
+            for pip_id in pipelines.keys():
+                pipeline = pipelines[pip_id]
+                plt.subplot(2, 2, count + 1)
+                plt.imshow(np.transpose(pipeline.density_matrix),
+                           cmap="binary", aspect="auto", vmin=0, vmax=np.ceil(self.grid_size / 7))
+                count += 1
+                plt.ylim([np.floor(link.length / self.grid_size), -0.5])
+            overall_title = link.link_id + "  " + link.link_type + "   ground truth"
+
+            plt.suptitle(overall_title)
+            plt.savefig(os.path.join(folder, link.link_id + "_density.png"), dpi=300)
+            # plt.show()
+            plt.close()
+
+            plt.figure(figsize=[19, 9])
+            count = 0
+            for pip_id in pipelines.keys():
+                pipeline = pipelines[pip_id]
+                plt.subplot(2, 2, count + 1)
+                plt.imshow(np.transpose(pipeline.real_time_density),
+                           cmap="binary", aspect="auto", vmin=0, vmax=np.ceil(self.grid_size / 7))
+                count += 1
+                plt.ylim([np.floor(link.length / self.grid_size), -0.5])
+            overall_title = link.link_id + "  " + link.link_type + "   real-time"
+
+            plt.suptitle(overall_title)
+            plt.savefig(os.path.join(folder, link.link_id + "_real-time_density.png"), dpi=300)
+            # plt.show()
+            plt.close()
+
+            plt.figure(figsize=[19, 9])
+            count = 0
+            for pip_id in pipelines.keys():
+                pipeline = pipelines[pip_id]
+                plt.subplot(2, 2, count + 1)
+                plt.imshow(np.transpose(pipeline.observed_density),
+                           cmap="binary", aspect="auto", vmin=0, vmax=np.ceil(self.grid_size / 7))
+                count += 1
+                plt.ylim([np.floor(link.length / self.grid_size), -0.5])
+            overall_title = link.link_id + "  " + link.link_type + "   observed"
+
+            plt.suptitle(overall_title)
+            plt.savefig(os.path.join(folder, link.link_id + "_observed_density.png"), dpi=300)
+            # plt.show()
             plt.close()
             print("Output", overall_title, "done")
 
@@ -349,7 +400,7 @@ class EstimatedNetwork(SignalizedNetwork, ABC):
 
         # add the downstream pipeline
         for link_id in self.links.keys():
-            link = self.links[link_id]
+            link = self.links[link_id] 
             pipelines = link.pipelines
             for pip_id in pipelines.keys():
                 pipeline = pipelines[pip_id]
@@ -448,19 +499,19 @@ class EstimatedNetwork(SignalizedNetwork, ABC):
                 for segment_id in segments.keys():
                     segment_edges = segments[segment_id]
                     if vehicle_edge in segment_edges:
-                        self.vehicles[vehicle_id].segment_list.append(segment_id)
+                        vehicle.segment_list.append(segment_id)
                         segment_assigned = True
                         break
                 if not segment_assigned:
                     original_segment = self.vehicles[vehicle_id].segment_list[-1]
-                    self.vehicles[vehicle_id].segment_list.append(original_segment)
+                    vehicle.segment_list.append(original_segment)
 
                 # get the pipeline id
                 pipeline_assigned = False
                 for pipeline_id in pipelines:
                     pipeline_lanes = pipelines[pipeline_id].lane_list
                     if vehicle_lane in pipeline_lanes:
-                        self.vehicles[vehicle_id].pipeline_list.append(pipeline_id)
+                        vehicle.pipeline_list.append(pipeline_id)
                         pipeline_assigned = True
 
                         if not (pipeline_id in pipeline_vehicle_dict.keys()):
@@ -470,7 +521,7 @@ class EstimatedNetwork(SignalizedNetwork, ABC):
 
                 if not pipeline_assigned:
                     original_pipeline = self.vehicles[vehicle_id].pipeline_list[-1]
-                    self.vehicles[vehicle_id].pipeline_list.append(original_pipeline)
+                    vehicle.pipeline_list.append(original_pipeline)
                     if not (original_pipeline in pipeline_vehicle_dict.keys()):
                         pipeline_vehicle_dict[original_pipeline] = {"vehicles": [], "dis": []}
                     pipeline_vehicle_dict[original_pipeline]["vehicles"].append(vehicle_id)
@@ -506,8 +557,7 @@ class EstimatedNetwork(SignalizedNetwork, ABC):
                     new_vehicle_list.append(vehicle_id_list[sdx])
                     new_distance_list.append(distance_list[sdx])
 
-                new_distance_list = [0] + new_distance_list + [link.length]
-
+                pipeline.complete_vehicles = [new_vehicle_list, new_distance_list]
                 # dump the vehicle to the pipeline
                 cv_list = []
                 non_cv_list = []
@@ -520,7 +570,7 @@ class EstimatedNetwork(SignalizedNetwork, ABC):
                     else:
                         non_cv_list.append(vid)
                         non_cv_distance_list.append(self.vehicles[vid].link_pos_list[-1])
-                self.links[link_id].pipelines[pipeline_id].vehicles = [cv_list, cv_distance_list]
+                pipeline.vehicles = [cv_list, cv_distance_list]
 
                 # dump the vehicle to the pipeline dict
                 for vdx in range(len(cv_list)):
@@ -528,18 +578,19 @@ class EstimatedNetwork(SignalizedNetwork, ABC):
                     vdis = cv_distance_list[vdx]
                     if not (vid in pipeline.cv_trajs.keys()):
                         self.links[link_id].pipelines[pipeline_id].cv_trajs[vid] = [[], []]
-                    self.links[link_id].pipelines[pipeline_id].cv_trajs[vid][0].append(self.time_step)
-                    self.links[link_id].pipelines[pipeline_id].cv_trajs[vid][1].append(vdis)
+                    pipeline.cv_trajs[vid][0].append(self.time_step)
+                    pipeline.cv_trajs[vid][1].append(vdis)
 
                 for vdx in range(len(non_cv_list)):
                     vid = non_cv_list[vdx]
                     vdis = non_cv_distance_list[vdx]
                     if not (vid in pipeline.non_cv_trajs.keys()):
                         self.links[link_id].pipelines[pipeline_id].non_cv_trajs[vid] = [[], []]
-                    self.links[link_id].pipelines[pipeline_id].non_cv_trajs[vid][0].append(self.time_step)
-                    self.links[link_id].pipelines[pipeline_id].non_cv_trajs[vid][1].append(vdis)
+                    pipeline.non_cv_trajs[vid][0].append(self.time_step)
+                    pipeline.non_cv_trajs[vid][1].append(vdis)
 
                 new_vehicle_list = [None] + new_vehicle_list + [None]
+                new_distance_list = [0] + new_distance_list + [link.length]
 
                 for vdx in range(len(new_vehicle_list) - 2):
                     following_vehicle = new_vehicle_list[vdx]
@@ -810,7 +861,7 @@ class ParticleLink(Link):
                     break
         return new_particles
 
-    def convert_coordinates(self, particle_number):
+    def convert_coordinates(self, particle_number, grid_size):
         for pip_id in self.pipelines.keys():
             pipeline = self.pipelines[pip_id]
             [_, cv_distance] = pipeline.vehicles
@@ -821,6 +872,8 @@ class ParticleLink(Link):
                 for ip in range(particle_number):
                     [locs, _] = cv_particles[ip]
                     vehicles_locations[ip] += locs
+
+            # spill over detection
             vehicles_nums = [len(val) for val in vehicles_locations]
             maximum_nums = pipeline.length / 7 + 2
             spillover = [val > maximum_nums for val in vehicles_nums]
@@ -830,7 +883,70 @@ class ParticleLink(Link):
                 pass
             pipeline.spillover = spillover
             pipeline.spillover_prob.append(spillover_prob)
-            # print(self.pipelines[pip_id].spillover_prob)
+
+            # convert the Eulerian coordinates
+            [_, all_distance] = pipeline.complete_vehicles
+
+            time_key = list(pipeline.particle_history.keys())
+            if len(time_key) == 0:
+                particle_locations = []
+            else:
+                temp_par_locs = pipeline.particle_history[time_key[-1]]
+                particle_locations = []
+                for val in temp_par_locs:
+                    particle_locations += val
+            link_length = self.length
+
+            cell_numbers = int(np.ceil(pipeline.length / grid_size))
+            real_time_density_vector = [0 for val in range(cell_numbers)]
+
+            for par_loc in particle_locations:
+                if par_loc >= link_length:
+                    # real_time_density_vector[0] += 1 / particle_number
+                    pass
+                elif par_loc <= 0:
+                    real_time_density_vector[-1] += 1 / particle_number
+                else:
+                    add_index = int((link_length - par_loc) / grid_size)
+                    if add_index >= cell_numbers:
+                        real_time_density_vector[-1] += 1 / particle_number
+                    else:
+                        real_time_density_vector[add_index] += 1 / particle_number
+
+            observed_density = [0 for val in range(cell_numbers)]
+            for val in cv_distance:
+                if val >= link_length:
+                    # real_time_density_vector[0] += 1
+                    # observed_density[0] += 1
+                    pass
+                elif val <= 0:
+                    real_time_density_vector[-1] += 1
+                    observed_density[-1] += 1
+                else:
+                    add_index = int((link_length - val) / grid_size)
+                    if add_index >= cell_numbers:
+                        real_time_density_vector[-1] += 1
+                        observed_density[-1] += 1
+                    else:
+                        real_time_density_vector[add_index] += 1
+                        observed_density[add_index] += 1
+            pipeline.real_time_density.append(real_time_density_vector)
+            pipeline.observed_density.append(observed_density)
+
+            density_vector = [0 for val in range(cell_numbers)]
+            for val in all_distance:
+                if val >= link_length:
+                    # density_vector[0] += 1
+                    pass
+                elif val <= 0:
+                    density_vector[-1] += 1
+                else:
+                    add_index = int((link_length - val) / grid_size)
+                    if add_index >= cell_numbers:
+                        density_vector[-1] += 1
+                    else:
+                        density_vector[add_index] += 1
+            pipeline.density_matrix.append(density_vector)
 
     def sort_lane_changing_events(self):
         if len(self.lane_change_events) <= 1:
@@ -883,10 +999,6 @@ class ParticleLink(Link):
             # check cv list
             if particle_keys[1:] != cv_list:
                 if set(particle_keys[1:]) == set(cv_list):
-                    # print("correct sequence")
-                    # print("particle keys", particle_keys[1:])
-                    # print("cv list", cv_list, cv_distance_list)
-                    # correct the sequence
                     new_keys_list = ["start"] + cv_list
                     new_particles = {}
                     for i_v in new_keys_list:
@@ -903,8 +1015,10 @@ class ParticleLink(Link):
 
             for i_p in range(len(cv_list) + 1):
                 if i_p == len(cv_list):
-                    last_distance = False
+                    mid_flag = False
+                    last_distance = self.length
                 else:
+                    mid_flag = True
                     last_distance = cv_distance_list[i_p]
                 cv_id = particle_keys[i_p]
                 local_particles = particles[cv_id]
@@ -919,7 +1033,7 @@ class ParticleLink(Link):
                     new_lane_change_list = lane_change_list
 
                     # if not the last, only car-following
-                    if last_distance:
+                    if mid_flag:
                         new_location_list = \
                             self.car_following.sample_next_locations(location_list + [last_distance], None, 1)
                     else:
@@ -935,6 +1049,7 @@ class ParticleLink(Link):
                             last_distance = 2 * self.length
                         else:
                             last_distance = downstream_dis[direction_flag][pdx]
+
                         new_location_list = \
                             self.car_following.sample_next_locations(location_list + [last_distance], None, 1)
 
@@ -1044,6 +1159,11 @@ class PipeLine(object):
         self.index = int(pipeline_id[-1])
         self.lane_list = lane_list
 
+        self.density_matrix = []
+        self.real_time_density = []
+        self.offline_density = []
+        self.observed_density = []
+
         self.arrival_rate = 0
         self.length = None
         self.start_dis = None
@@ -1064,6 +1184,7 @@ class PipeLine(object):
 
         # real-time state
         self.vehicles = [[], []]
+        self.complete_vehicles = [[], []]
         self.previous_vehicles = [[], []]
 
         self.cv_trajs = {}
