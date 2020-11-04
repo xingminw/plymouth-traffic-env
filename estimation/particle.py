@@ -41,10 +41,10 @@ class EstimatedNetwork(SignalizedNetwork, ABC):
         SignalizedNetwork.__init__(self)
 
         # number of particles
-        self.particle_number = 3
+        self.particle_number = 20
 
         # number of grid size
-        self.grid_size = 14
+        self.grid_size = 15
 
         # load demand and turning ratio
         demand_dict, turning_dict = self._load_demand_and_turning_ratio()
@@ -781,6 +781,7 @@ class ParticleLink(Link):
     def resample(self, particle_number):
         if self.link_type == "wrong" or self.link_type == "sink":
             return
+
         for pip_id in self.pipelines.keys():
             pipeline = self.pipelines[pip_id]
             [cv_list, cv_dis] = pipeline.vehicles
@@ -916,8 +917,6 @@ class ParticleLink(Link):
             observed_density = [0 for val in range(cell_numbers)]
             for val in cv_distance:
                 if val >= link_length:
-                    # real_time_density_vector[0] += 1
-                    # observed_density[0] += 1
                     pass
                 elif val <= 0:
                     real_time_density_vector[-1] += 1
@@ -936,7 +935,6 @@ class ParticleLink(Link):
             density_vector = [0 for val in range(cell_numbers)]
             for val in all_distance:
                 if val >= link_length:
-                    # density_vector[0] += 1
                     pass
                 elif val <= 0:
                     density_vector[-1] += 1
@@ -1010,17 +1008,17 @@ class ParticleLink(Link):
                     print(self.link_id, pip_id, "not consistent")
                     print(cv_list, cv_distance_list)
                     print(particle_keys[1:])
-                    print(self.lane_change_events)
-                    exit("not consistent error!")
+                    print("Lane change info", self.lane_change_events)
+                    print("not consistent error!")
 
-            for i_p in range(len(cv_list) + 1):
-                if i_p == len(cv_list):
+            for vdx in range(len(cv_list) + 1):
+                if vdx == len(cv_list):
                     mid_flag = False
                     last_distance = self.length
                 else:
                     mid_flag = True
-                    last_distance = cv_distance_list[i_p]
-                cv_id = particle_keys[i_p]
+                    last_distance = cv_distance_list[vdx]
+                cv_id = particle_keys[vdx]
                 local_particles = particles[cv_id]
 
                 for pdx in range(pipeline.particle_number):
@@ -1063,9 +1061,6 @@ class ParticleLink(Link):
                             new_lane_change_list = lane_change_list[:-1]
                             location_list = location_list[:-1]
                             lane_change_list = lane_change_list[:-1]
-
-                    # self.pipelines[pip_id].particles[cv_id][pdx] = [new_location_list, new_lane_change_list]
-                    # continue
 
                     latest_locations = []
                     latest_lane_infos = []
@@ -1114,7 +1109,6 @@ class ParticleLink(Link):
                                 latest_lane_infos.append(lane_change_list[::-1][i_v])
                                 continue
                             else:
-                                # directly move the vehicle to the destination link
                                 insert_index = 0
                                 for i_dis in range(len(destination_dis)):
                                     if location > destination_dis[i_dis]:
@@ -1136,9 +1130,8 @@ class ParticleLink(Link):
                                     new_dest_lane = dest_lane[:insert_index] + [lane_change] + dest_lane[
                                                                                                insert_index:]
 
-                                self.pipelines[dest_pip_id].particles[insert_cv][pdx] = [new_dest_dis,
-                                                                                         new_dest_lane]
-                    self.pipelines[pip_id].particles[cv_id][pdx] = [latest_locations[::-1], latest_lane_infos[::-1]]
+                                pipeline.particles[insert_cv][pdx] = [new_dest_dis, new_dest_lane]
+                    pipeline.particles[cv_id][pdx] = [latest_locations[::-1], latest_lane_infos[::-1]]
 
     def get_lane_belonged_pipeline(self, lane_id):
         for pip_id in self.pipelines.keys():

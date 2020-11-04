@@ -13,8 +13,8 @@ class SimplifiedModel(object):
         self.maximum_sigma = 2
         self.minimum_sigma = 0.8
 
-        self.particle_sigma_max = 10
-        self.particle_sigma_min = 1
+        self.particle_sigma_max = 5
+        self.particle_sigma_min = 0.2
 
     def _get_mean(self, headway):
         """
