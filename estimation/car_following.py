@@ -10,8 +10,8 @@ class SimplifiedModel(object):
         self.free_flow_speed = 15               # free flow speed
         self.jam_density = 7                    # jam density
         self.free_density = 30
-        self.maximum_sigma = 2
-        self.minimum_sigma = 0.8
+        self.maximum_sigma = 1
+        # self.minimum_sigma = 0.8
 
         self.particle_sigma_max = 5
         self.particle_sigma_min = 0.2
@@ -22,7 +22,7 @@ class SimplifiedModel(object):
         :param headway:
         :return:
         """
-        if headway < -2:
+        if headway < -5:
             return self.free_flow_speed
         if headway <= self.jam_density:
             return 0
@@ -73,11 +73,7 @@ class SimplifiedModel(object):
             proportion = speed / self.free_flow_speed
             std_val = proportion * self.particle_sigma_max + (1 - proportion) * self.particle_sigma_min
         mean_speed = self._get_mean(headway)
-        # print()
-        # print("real speed", speed, "std val", std_val, "expected speed", mean_speed)
         weight = norm.pdf(speed, mean_speed, std_val) * 100
-        # print("weight calculation:", "headway", headway, "speed", speed,
-        #       "desired speed", mean_speed, "weight", weight)
         return weight
 
 

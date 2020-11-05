@@ -41,7 +41,7 @@ class EstimatedNetwork(SignalizedNetwork, ABC):
         SignalizedNetwork.__init__(self)
 
         # number of particles
-        self.particle_number = 20
+        self.particle_number = 10
 
         # number of grid size
         self.grid_size = 15
@@ -76,7 +76,7 @@ class EstimatedNetwork(SignalizedNetwork, ABC):
     def particle_filter(self):
         for link_id in self.links.keys():
             self.links[link_id].particle_forward(self.time_step)
-            self.links[link_id].resample(self.particle_number)
+            # self.links[link_id].resample(self.particle_number)
 
             # left-turn spillover
             self.links[link_id].convert_coordinates(self.particle_number, self.grid_size)
@@ -202,21 +202,21 @@ class EstimatedNetwork(SignalizedNetwork, ABC):
             # plt.show()
             plt.close()
 
-            plt.figure(figsize=[19, 9])
-            count = 0
-            for pip_id in pipelines.keys():
-                pipeline = pipelines[pip_id]
-                plt.subplot(2, 2, count + 1)
-                plt.imshow(np.transpose(pipeline.observed_density),
-                           cmap="binary", aspect="auto", vmin=0, vmax=np.ceil(self.grid_size / 7))
-                count += 1
-                plt.ylim([np.floor(link.length / self.grid_size), -0.5])
-            overall_title = link.link_id + "  " + link.link_type + "   observed"
-
-            plt.suptitle(overall_title)
-            plt.savefig(os.path.join(folder, link.link_id + "_observed_density.png"), dpi=300)
-            # plt.show()
-            plt.close()
+            # plt.figure(figsize=[19, 9])
+            # count = 0
+            # for pip_id in pipelines.keys():
+            #     pipeline = pipelines[pip_id]
+            #     plt.subplot(2, 2, count + 1)
+            #     plt.imshow(np.transpose(pipeline.observed_density),
+            #                cmap="binary", aspect="auto", vmin=0, vmax=np.ceil(self.grid_size / 7))
+            #     count += 1
+            #     plt.ylim([np.floor(link.length / self.grid_size), -0.5])
+            # overall_title = link.link_id + "  " + link.link_type + "   observed"
+            #
+            # plt.suptitle(overall_title)
+            # plt.savefig(os.path.join(folder, link.link_id + "_observed_density.png"), dpi=300)
+            # # plt.show()
+            # plt.close()
             print("Output", overall_title, "done")
 
     def link_communication(self):
@@ -796,11 +796,16 @@ class ParticleLink(Link):
 
             # determine the weight of the particles
             particle_weights = [1 for temp in range(particle_number)]
-            exit_length = np.min([pipeline.exit_length[val] for val in pipeline.exit_length.keys()] + [10000])
+
+            downstream_dis = pipeline.downstream_dis
+            if downstream_dis is None:
+                downstream_dis = [2 * self.length]
+            else:
+                downstream_dis = [downstream_dis[val][0] for val in downstream_dis.keys()]
 
             particles = pipeline.particles
             vehicle_list = list(particles.keys())[1:] + ["end"]
-            pr_dis_dict["end"] = exit_length
+            pr_dis_dict["end"] = downstream_dis
 
             if len(vehicle_list) <= 2:
                 continue
@@ -808,20 +813,31 @@ class ParticleLink(Link):
                 local_vid = vehicle_list[vid]
                 if not (local_vid in cv_list):
                     continue
+
                 next_vid = vehicle_list[vid + 1]
                 particle = particles[local_vid]
 
-                cv_headway = pr_dis_dict[next_vid] - pr_dis_dict[local_vid]
                 following_speed = cv_dis_dict[local_vid] - pr_dis_dict[local_vid]
 
                 for pdx in range(particle_number):
                     [locations, _] = particle[pdx]
                     if len(locations) > 1:
                         headway = locations[0] - pr_dis_dict[local_vid]
+                        local_weight = self.car_following.get_weight(headway, following_speed)
+                        particle_weights[pdx] *= local_weight
                     else:
-                        headway = cv_headway
-                    local_weight = self.car_following.get_weight(headway, following_speed)
-                    particle_weights[pdx] *= local_weight
+                        if next_vid == "end":
+                            lead_dis = pr_dis_dict[next_vid]
+                            local_weight_list = []
+                            for dis in lead_dis:
+                                headway = dis - pr_dis_dict[local_vid]
+                                local_weight_list.append(self.car_following.get_weight(headway, following_speed))
+                            local_weight = np.average(local_weight_list)
+
+                        else:
+                            headway = pr_dis_dict[next_vid] - pr_dis_dict[local_vid]
+                            local_weight = self.car_following.get_weight(headway, following_speed)
+                        particle_weights[pdx] *= local_weight
 
             resampled_sequence = self.get_resample_particle(particle_weights)
 
@@ -1249,6 +1265,12 @@ class PipeLine(object):
         return 0
 
     def insert_cv(self, cv_id, cv_dis):
+        """
+        insert cv to a certain pipeline
+        :param cv_id:
+        :param cv_dis:
+        :return:
+        """
         pr_distance_list = [0] + self.previous_vehicles[1]
         pr_vehicle_list = list(self.particles.keys())
         insert_cv_index = len(pr_distance_list)
@@ -1285,10 +1307,10 @@ class PipeLine(object):
         new_particle = {}
         for v_id in new_cv_list:
             if v_id == split_cv:
-                new_particle[v_id] = lead_particle
+                new_particle[v_id] = lag_particle
                 continue
             if v_id == cv_id:
-                new_particle[v_id] = lag_particle
+                new_particle[v_id] = lead_particle
                 continue
             # not inserted yet
             if not (v_id in self.particles.keys()):

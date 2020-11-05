@@ -20,7 +20,7 @@ def run_env():
 
     # set the simulation parameters
     env.output_cost = False                  # enable output figure
-    env.penetration_rate = 0.4                # set the penetration rate
+    env.penetration_rate = 0.95                # set the penetration rate
     env.save_trajs = False                   # enable output trajectories
     env.relative_demand = 0.6               # set relative demand level
     env.terminate_steps = 599               # set the simulation steps (MAXIMUM: 3599)
