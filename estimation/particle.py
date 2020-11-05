@@ -232,7 +232,7 @@ class EstimatedNetwork(SignalizedNetwork, ABC):
                 continue
             pipelines = link.pipelines
             for pip_id in pipelines.keys():
-                self.links[link_id].pipelines[pip_id].upstream_arrival = [0] * self.particle_number
+                self.links[link_id].pipelines[pip_id].upstream_arrival = [0 for val in range(self.particle_number)]
 
         for link_id in self.links.keys():
             link = self.links[link_id]
@@ -260,7 +260,7 @@ class EstimatedNetwork(SignalizedNetwork, ABC):
                     downstream_pip = self.links[downstream_links[i_dir]].pipelines[downstream_pip_id]
                     downstream_particles = downstream_pip.particles
 
-                    local_downstream_dis = [link.length + 7] * self.particle_number
+                    local_downstream_dis = [link.length + 7 for val in range(self.particle_number)]
                     for ip in range(self.particle_number):
                         if outflow_flag:
                             if outflow[direction][ip] is not None:
@@ -1002,7 +1002,7 @@ class ParticleLink(Link):
             pipeline.outflow = {}
 
             for i_dir in direction:
-                self.pipelines[pip_id].outflow[i_dir] = [None] * pipeline.particle_number
+                self.pipelines[pip_id].outflow[i_dir] = [None for val in range(pipeline.particle_number)]
 
             [cv_list, cv_distance_list] = deepcopy(pipeline.previous_vehicles)
             downstream_num = len(direction)
@@ -1215,7 +1215,7 @@ class PipeLine(object):
         new_particles = {}
         for ik in new_keys:
             if ik == "start":
-                new_particles[ik] = [[[], []]] * self.particle_number
+                new_particles[ik] = [[[], []] for val in range(self.particle_number)]
                 continue
             if ik == cv_id:
                 new_particles[cv_id] = self.particles["start"]
