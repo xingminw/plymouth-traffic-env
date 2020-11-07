@@ -42,7 +42,7 @@ class EstimatedNetwork(SignalizedNetwork, ABC):
         SignalizedNetwork.__init__(self)
 
         # number of particles
-        self.particle_number = 3
+        self.particle_number = 2
 
         # number of grid size
         self.grid_size = 15
@@ -612,9 +612,9 @@ class EstimatedNetwork(SignalizedNetwork, ABC):
 
                 previous_vehicles = pipeline.previous_vehicles[0]
                 current_vehicles = pipeline.vehicles[0]
-                print("Pipeline", pipeline.id)
-                print("Previous vehicles:", previous_vehicles)
-                print("Current vehicles:", current_vehicles)
+                # print("Pipeline", pipeline.id)
+                # print("Previous vehicles:", previous_vehicles)
+                # print("Current vehicles:", current_vehicles)
 
                 # get the entering vehicle
                 interrupt = False
@@ -633,7 +633,7 @@ class EstimatedNetwork(SignalizedNetwork, ABC):
                             print("current vehicles:", current_vehicles)
                             exit("There is something wrong with this new vehicle arrival detection")
                         else:
-                            print("new vehicle coming outside for pipeline", pipeline.id, ":", vid)
+                            # print("new vehicle coming outside for pipeline", pipeline.id, ":", vid)
                             pipeline.enter_cv.append(vid)
 
                 # get the exit vehicle
@@ -652,7 +652,7 @@ class EstimatedNetwork(SignalizedNetwork, ABC):
                             print("current vehicles:", current_vehicles)
                             exit("There is something wrong with this new vehicle exit detection")
                         else:
-                            print("new exit detected for pipeline", pipeline.id, ":", vid)
+                            # print("new exit detected for pipeline", pipeline.id, ":", vid)
                             pipeline.exit_cv.append(vid)
 
                 if len(pipeline.exit_cv) > 1:
@@ -674,10 +674,10 @@ class EstimatedNetwork(SignalizedNetwork, ABC):
                     print("Enter vehicles:", )
                     exit("Something strange happens, more than one CVs enter, it SUMO's error!")
 
-                if len(pipeline.lane_change_out) > 0:
-                    print("Lane change out detected for pipeline", pipeline.id, ":", pipeline.lane_change_out)
-                if len(pipeline.lane_change_in) > 0:
-                    print("Lane change in detected for pipeline", pipeline.id, ":", pipeline.lane_change_in)
+                # if len(pipeline.lane_change_out) > 0:
+                #     print("Lane change out detected for pipeline", pipeline.id, ":", pipeline.lane_change_out)
+                # if len(pipeline.lane_change_in) > 0:
+                #     print("Lane change in detected for pipeline", pipeline.id, ":", pipeline.lane_change_in)
 
     def _get_coordinates(self, link_id, pip_id, link_pos_list):
         link = self.links[link_id]
@@ -762,11 +762,6 @@ class ParticleLink(Link):
         # perform a one-slot car following (prediction)
         self.step()
 
-        # match the updated particle
-        for pip_id in pipelines.keys():
-            pipeline = pipelines[pip_id]
-            pipeline.update_particle_dict()
-
         for pip_id in pipelines.keys():
             pipeline = pipelines[pip_id]
 
@@ -794,8 +789,7 @@ class ParticleLink(Link):
                     print("Arrived CV:", arrived_cv)
                     print("Pipeline current CV:", cv_list)
                     exit("Arrived CV not found!")
-
-                print("Add new CV", arrived_cv[0], "to", pipeline.id)
+                # print("Add new CV", arrived_cv[0], "to", pipeline.id)
                 pipeline.new_cv_arrived(arrived_cv[0], arrived_distance)
 
             # remove the exit CV
@@ -807,16 +801,11 @@ class ParticleLink(Link):
                         print(particles[ip], "link length:", self.length)
                         print("Abnormal situation: the vehicle to be removed has leading particle vehicle...")
                 del pipeline.particles[val]
-                print("Remove", val, "from", pipeline.id)
+                # print("Remove", val, "from", pipeline.id)
 
-        # deal with the lane changing
-        self.sort_lane_changing_events()
-        if len(self.lane_change_events) > 0:
-            # print(self.lane_change_events)
-            for cv_id in self.lane_change_events.keys():
-                [from_pip, to_pip, cv_dis] = self.lane_change_events[cv_id]
-                self.pipelines[from_pip].remove_cv(cv_id)
-                self.pipelines[to_pip].insert_cv(cv_id, cv_dis)
+            # match the updated particle if not matched
+            if list(pipeline.particles.keys())[1:] != cv_list:
+                pipeline.update_particle_dict()
 
         # save the particle to memory
         for pip_id in self.pipelines.keys():
@@ -1076,23 +1065,12 @@ class ParticleLink(Link):
 
             # check cv list
             if particle_keys[1:] != cv_list:
-                if set(particle_keys[1:]) == set(cv_list):
-                    print("\nreport error information")
-                    print("Pipeline", pip_id, "not consistent")
-                    print("Previous vehicles:", pipeline.previous_vehicles)
-                    print("Current vehicles:", pipeline.vehicles)
-                    print("Particle keys:", particle_keys)
-                    print("Sequence not correct")
-                    exit("Check the sequence")
-                else:
-                    sleep(1)
-                    print("\nreport error information")
-                    print("Pipeline", pip_id, "not consistent")
-                    print("Previous vehicles:", pipeline.previous_vehicles)
-                    print("Current vehicles:", pipeline.vehicles)
-                    print("Particle keys:", particle_keys)
-                    print("not consistent error!")
-                    exit()
+                print("\nreport error information")
+                print("Pipeline", pip_id, "not consistent")
+                print("Previous vehicles:", pipeline.previous_vehicles)
+                print("Current vehicles:", pipeline.vehicles)
+                print("Particle keys:", particle_keys)
+                exit("Not consistent error!")
 
             for vdx in range(len(cv_list) + 1):
                 if vdx == len(cv_list):
@@ -1160,6 +1138,10 @@ class ParticleLink(Link):
 
                         # keep in the lane
                         if lane_change is None:
+                            latest_locations.append(location)
+                            latest_lane_infos.append(lane_change)
+                            continue
+                        if location < 20:
                             latest_locations.append(location)
                             latest_lane_infos.append(lane_change)
                             continue
@@ -1284,12 +1266,72 @@ class PipeLine(object):
         # {"start": [[distance1 < distance2 <...], [dest_pip1, dest_pip2, ...]]}
         self.particles = {"start": [[[], []]] * particle_number}
 
+    def update_particle_dict(self):
+        # the change of the CV includes three parts: arrival, departure, and lane change
+        particles = self.particles
+
+        print()
+        print("rearrange count")
+        print(particles)
+
+        location_list = [[] for fvd in range(self.particle_number)]
+        lane_change_list = [[] for fvd in range(self.particle_number)]
+        for fvd in particles.keys():
+            for ip in range(self.particle_number):
+                current_locs = particles[fvd][ip]
+                location_list[ip] += current_locs[0]
+                lane_change_list[ip] += current_locs[1]
+
+        new_cv_list = ["start"] + self.vehicles[0]
+        cv_distance_list = self.vehicles[1] + [1000000]
+
+        # initiate the new particle
+        new_particle_dict = {}
+        for cv_id in new_cv_list:
+            new_particle_dict[cv_id] = [[[], []] for val in range(self.particle_number)]
+
+        for ip in range(self.particle_number):
+            local_locations = location_list[ip]
+            local_lane_change = lane_change_list[ip]
+
+            # check sequence
+            sequence_correct = True
+            for idx in range(len(local_locations) - 1):
+                if local_locations[idx + 1] < local_locations[idx]:
+                    sequence_correct = False
+                    break
+            if not sequence_correct:
+                new_sequence = np.argsort(local_locations)
+                correct_locations = []
+                correct_lane_changes = []
+                for idx in range(len(new_sequence)):
+                    correct_locations.append(local_locations[new_sequence[idx]])
+                    correct_lane_changes.append(local_lane_change[new_sequence[idx]])
+            else:
+                correct_locations = local_locations
+                correct_lane_changes = local_lane_change
+
+            cursor = 0
+            for idx in range(len(correct_locations)):
+                local_loc = correct_locations[idx]
+                local_lane = correct_lane_changes[idx]
+                while local_loc > cv_distance_list[cursor]:
+                    cursor += 1
+                new_particle_dict[new_cv_list[cursor]][ip][0].append(local_loc)
+                new_particle_dict[new_cv_list[cursor]][ip][1].append(local_lane)
+
+        self.particles = new_particle_dict
+
+        print(new_cv_list)
+        print(cv_distance_list)
+        print(new_particle_dict)
+        print("done")
+
     def new_cv_arrived(self, cv_id, cv_dis):
         old_keys = list(self.particles.keys())
         new_keys = old_keys[:1] + [cv_id] + old_keys[1:]
         self.previous_vehicles[0] = [cv_id] + self.previous_vehicles[0]
         self.previous_vehicles[1] = [cv_dis] + self.previous_vehicles[1]
-        # print("add", cv_dis, cv_id, self.id)
 
         new_particles = {}
         for ik in new_keys:
@@ -1342,79 +1384,6 @@ class PipeLine(object):
                 else:
                     self.particles["start"][ip][1] = [None] + self.particles["start"][ip][1]
         return 0
-
-    def insert_cv(self, cv_id, cv_dis):
-        """
-        insert cv to a certain pipeline
-        :param cv_id:
-        :param cv_dis:
-        :return:
-        """
-        pr_distance_list = [0] + self.previous_vehicles[1]
-        pr_vehicle_list = list(self.particles.keys())
-        insert_cv_index = len(pr_distance_list)
-        for idx in range(len(pr_distance_list)):
-            if cv_dis < pr_distance_list[idx]:
-                insert_cv_index = idx
-                break
-        new_cv_list = pr_vehicle_list[:insert_cv_index] + [cv_id] + pr_vehicle_list[insert_cv_index:]
-        new_dis_list = pr_distance_list[:insert_cv_index] + [cv_dis] + pr_distance_list[insert_cv_index:]
-        self.previous_vehicles[0] = new_cv_list[1:]
-        self.previous_vehicles[1] = new_dis_list[1:]
-
-        split_cv = new_cv_list[insert_cv_index - 1]
-        if not (split_cv in self.particles.keys()):
-            print("insert cv error", self.id)
-            print(pr_distance_list, pr_vehicle_list)
-            print(new_cv_list, new_dis_list, split_cv)
-        split_particle = self.particles[split_cv]
-        lead_particle = []
-        lag_particle = []
-        for ip in range(len(split_particle)):
-            [dis_list, lane_list] = split_particle[ip]
-            s_index = len(dis_list)
-            for iv in range(len(dis_list)):
-                if dis_list[iv] > cv_dis:
-                    s_index = iv
-            p_dis = dis_list[:s_index]
-            p_lane = lane_list[:s_index]
-            lag_dis = dis_list[s_index:]
-            lag_lane = lane_list[s_index:]
-            lead_particle.append([p_dis, p_lane])
-            lag_particle.append([lag_dis, lag_lane])
-
-        new_particle = {}
-        for v_id in new_cv_list:
-            if v_id == split_cv:
-                new_particle[v_id] = lag_particle
-                continue
-            if v_id == cv_id:
-                new_particle[v_id] = lead_particle
-                continue
-            # not inserted yet
-            if not (v_id in self.particles.keys()):
-                continue
-            new_particle[v_id] = self.particles[v_id]
-
-        self.particles = new_particle
-
-    def remove_cv(self, cv_id):
-        if not (cv_id in self.particles.keys()):
-            exit("CV id " + cv_id + " not in the particle keys! (" + str(self.id) + ")")
-
-        merge_cv_index = None
-        cv_list = list(self.particles.keys())
-        for idx in range(len(cv_list)):
-            if cv_id == cv_list[idx]:
-                merge_cv_index = idx
-                break
-        new_particle = self.merge(self.particles[cv_list[merge_cv_index - 1]],
-                                  self.particles[cv_list[merge_cv_index]])
-
-        self.particles[cv_list[merge_cv_index - 1]] = new_particle
-        del self.particles[cv_id]
-        del self.previous_vehicles[0][merge_cv_index - 1]
-        del self.previous_vehicles[1][merge_cv_index - 1]
 
     def save_particle(self, time_step):
         particles = self.particles
