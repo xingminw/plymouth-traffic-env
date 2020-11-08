@@ -42,7 +42,7 @@ class EstimatedNetwork(SignalizedNetwork, ABC):
         SignalizedNetwork.__init__(self)
 
         # number of particles
-        self.particle_number = 2
+        self.particle_number = 20
 
         # number of grid size
         self.grid_size = 15
@@ -76,8 +76,8 @@ class EstimatedNetwork(SignalizedNetwork, ABC):
 
     def particle_filter(self):
         for link_id in self.links.keys():
+            self.links[link_id].resample(self.particle_number)
             self.links[link_id].particle_forward(self.time_step)
-            # self.links[link_id].resample(self.particle_number)
 
             # left-turn spillover
             self.links[link_id].convert_coordinates(self.particle_number, self.grid_size)
@@ -612,10 +612,6 @@ class EstimatedNetwork(SignalizedNetwork, ABC):
 
                 previous_vehicles = pipeline.previous_vehicles[0]
                 current_vehicles = pipeline.vehicles[0]
-                # print("Pipeline", pipeline.id)
-                # print("Previous vehicles:", previous_vehicles)
-                # print("Current vehicles:", current_vehicles)
-
                 # get the entering vehicle
                 interrupt = False
                 for vid in current_vehicles:
@@ -792,17 +788,6 @@ class ParticleLink(Link):
                 # print("Add new CV", arrived_cv[0], "to", pipeline.id)
                 pipeline.new_cv_arrived(arrived_cv[0], arrived_distance)
 
-            # remove the exit CV
-            exit_cv = pipeline.exit_cv
-            for val in exit_cv:
-                particles = pipeline.particles[val]
-                for ip in range(len(particles)):
-                    if len(particles[ip][0]) > 0:
-                        print(particles[ip], "link length:", self.length)
-                        print("Abnormal situation: the vehicle to be removed has leading particle vehicle...")
-                del pipeline.particles[val]
-                # print("Remove", val, "from", pipeline.id)
-
             # match the updated particle if not matched
             if list(pipeline.particles.keys())[1:] != cv_list:
                 pipeline.update_particle_dict()
@@ -820,6 +805,9 @@ class ParticleLink(Link):
             [cv_list, cv_dis] = pipeline.vehicles
             [pr_cv_list, pr_cv_dis] = pipeline.previous_vehicles
 
+            # print("current cv", cv_list, cv_dis)
+            # print("previous cv", pr_cv_list, pr_cv_dis)
+
             cv_dis_dict = {}
             for iv in range(len(cv_list)):
                 cv_dis_dict[cv_list[iv]] = cv_dis[iv]
@@ -827,70 +815,59 @@ class ParticleLink(Link):
             for iv in range(len(pr_cv_list)):
                 pr_dis_dict[pr_cv_list[iv]] = pr_cv_dis[iv]
 
-            # determine the weight of the particles
-            particle_weights = [1 for temp in range(particle_number)]
-
-            downstream_dis = pipeline.downstream_dis
-            if downstream_dis is None:
-                downstream_dis = [2 * self.length]
-            else:
-                downstream_dis = [downstream_dis[val][0] for val in downstream_dis.keys()]
-
-            particles = pipeline.particles
-            vehicle_list = list(particles.keys())[1:] + ["end"]
-            pr_dis_dict["end"] = downstream_dis
-
-            if len(vehicle_list) <= 2:
-                continue
-            for vid in range(len(vehicle_list) - 1):
-                local_vid = vehicle_list[vid]
-                if not (local_vid in cv_list):
+            critical_cv = {}
+            for vdx in range(len(pr_cv_list)):
+                pr_vid = pr_cv_list[vdx]
+                if not (pr_vid in cv_list):
                     continue
 
-                next_vid = vehicle_list[vid + 1]
-                particle = particles[local_vid]
+                if vdx == len(pr_cv_list) - 1:
+                    downstream_dis = pipeline.downstream_dis
+                    if downstream_dis is None:
+                        downstream_dis = [2 * self.length]
+                    else:
+                        downstream_dis = [downstream_dis[val][0] for val in downstream_dis.keys()]
 
-                following_speed = cv_dis_dict[local_vid] - pr_dis_dict[local_vid]
+                    headway_list = [val - pr_dis_dict[pr_vid] for val in downstream_dis]
+                    critical_cv[pr_vid] = {"speed": cv_dis_dict[pr_vid] - pr_dis_dict[pr_vid],
+                                           "headway": headway_list, "dis": pr_dis_dict[pr_vid]}
+                else:
+                    critical_cv[pr_vid] = {"speed": cv_dis_dict[pr_vid] - pr_dis_dict[pr_vid],
+                                           "headway": [pr_dis_dict[pr_cv_list[vdx + 1]] - pr_dis_dict[pr_vid]],
+                                           "dis": pr_dis_dict[pr_vid]}
+                # print(pr_vid, critical_cv[pr_vid])
 
+            # determine the weight of the particles
+            particle_weights = [1 for temp in range(particle_number)]
+            particles = pipeline.particles
+
+            for vid in critical_cv.keys():
+                speed = critical_cv[vid]["speed"]
+
+                local_particle = particles[vid]
                 for pdx in range(particle_number):
-                    [locations, lanes_info] = particle[pdx]
-                    if len(locations) >= 1:
-                        headway = locations[0] - pr_dis_dict[local_vid]
-                        local_weight = self.car_following.get_weight(headway, following_speed)
-
-                        # # add adjustment to two special cases
-                        # # if headway is less than 1, remove the vehicle in front of the CV
-                        # if headway < 1:
-                        #     # print(headway, following_speed, local_weight)
-                        #     # print(locations[:min(5, len(locations) - 1)], lanes_info[:min(5, len(locations) - 1)])
-                        #     local_weight = 0.0001
-                        #     particles[local_vid][pdx] = [locations[1:], lanes_info[1:]]
-                        #     print([locations[1:min(5, len(locations) - 1)],
-                        #            lanes_info[1:min(5, len(locations) - 1)]])
-                        #
-                        # # if headway is too large, add another vehicles
-                        # if local_weight < 1e-10:
-                        #     # print(headway, following_speed, local_weight)
-                        #     # print(locations[:min(5, len(locations) - 1)], lanes_info[:min(5, len(locations) - 1)])
-                        #     local_weight = 0.001
-                        #     particles[local_vid][pdx] =\
-                        #         [[pr_dis_dict[local_vid] + 7 + following_speed] + locations, [None] + lanes_info]
-                        #     # print([[pr_dis_dict[local_vid]] + locations[:min(5, len(locations) - 1)],
-                        #     #        [None] + lanes_info[:min(5, len(locations) - 1)]])
-
+                    [locations, lanes_info] = local_particle[pdx]
+                    if len(locations) > 1:
+                        headway = locations[0] - critical_cv[vid]["dis"]
+                        local_weight = self.car_following.get_weight(headway, speed)
+                        if headway < 2.5:
+                            local_weight = 0.1
+                            particles[vid][pdx] = [locations[1:], lanes_info[1:]]
+                        if speed < 1 and headway > 11:
+                            particles[vid][pdx] = [[critical_cv[vid]["dis"] + 7] + locations, [None] + lanes_info]
+                            local_weight = 0.1
                         particle_weights[pdx] *= local_weight
                     else:
-                        if next_vid == "end":
-                            lead_dis = pr_dis_dict[next_vid]
-                            local_weight_list = []
-                            for dis in lead_dis:
-                                headway = dis - pr_dis_dict[local_vid]
-                                local_weight_list.append(self.car_following.get_weight(headway, following_speed))
-                            local_weight = np.average(local_weight_list)
-                        else:
-                            headway = pr_dis_dict[next_vid] - pr_dis_dict[local_vid]
-                            local_weight = self.car_following.get_weight(headway, following_speed)
-                        particle_weights[pdx] *= local_weight
+                        temp_weight_list = []
+                        headway_list = np.sort(critical_cv[vid]["headway"])
+                        for headway in headway_list:
+                            if speed < 1 and headway > 11:
+                                particles[vid][pdx] = [[critical_cv[vid]["dis"] + 7], [None]]
+                                temp_weight_list.append(0.1)
+                                break
+
+                            temp_weight_list.append(self.car_following.get_weight(headway, speed))
+                        particle_weights[pdx] *= np.average(temp_weight_list)
 
             resampled_sequence = self.get_resample_particle(particle_weights)
 
@@ -911,6 +888,7 @@ class ParticleLink(Link):
         total_weights = np.sum(particle_weights)
         # print("total weights", total_weights)
         if total_weights < 1e-6:
+            # print("Total weights too small as", total_weights, "invalid particles any more!")
             return range(len(particle_weights))
 
         weight_list = [val / total_weights for val in particle_weights]
@@ -1270,10 +1248,6 @@ class PipeLine(object):
         # the change of the CV includes three parts: arrival, departure, and lane change
         particles = self.particles
 
-        print()
-        print("rearrange count")
-        print(particles)
-
         location_list = [[] for fvd in range(self.particle_number)]
         lane_change_list = [[] for fvd in range(self.particle_number)]
         for fvd in particles.keys():
@@ -1321,11 +1295,6 @@ class PipeLine(object):
                 new_particle_dict[new_cv_list[cursor]][ip][1].append(local_lane)
 
         self.particles = new_particle_dict
-
-        print(new_cv_list)
-        print(cv_distance_list)
-        print(new_particle_dict)
-        print("done")
 
     def new_cv_arrived(self, cv_id, cv_dis):
         old_keys = list(self.particles.keys())

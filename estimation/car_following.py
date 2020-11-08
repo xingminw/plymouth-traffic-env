@@ -74,6 +74,7 @@ class SimplifiedModel(object):
             std_val = proportion * self.particle_sigma_max + (1 - proportion) * self.particle_sigma_min
         mean_speed = self._get_mean(headway)
         weight = norm.pdf(speed, mean_speed, std_val) * 100
+        # print("Following speed is", speed, "headway is", headway, ", the weight:", weight)
         return weight
 
 
