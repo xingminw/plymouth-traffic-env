@@ -42,7 +42,7 @@ class EstimatedNetwork(SignalizedNetwork, ABC):
         SignalizedNetwork.__init__(self)
 
         # number of particles
-        self.particle_number = 20
+        self.particle_number = 1
 
         # number of grid size
         self.grid_size = 15
@@ -233,7 +233,7 @@ class EstimatedNetwork(SignalizedNetwork, ABC):
                 continue
             pipelines = link.pipelines
             for pip_id in pipelines.keys():
-                self.links[link_id].pipelines[pip_id].upstream_arrival = [0 for val in range(self.particle_number)]
+                self.links[link_id].pipelines[pip_id].upstream_arrival = [None for val in range(self.particle_number)]
 
         for link_id in self.links.keys():
             link = self.links[link_id]
@@ -789,8 +789,8 @@ class ParticleLink(Link):
                 pipeline.new_cv_arrived(arrived_cv[0], arrived_distance)
 
             # match the updated particle if not matched
-            if list(pipeline.particles.keys())[1:] != cv_list:
-                pipeline.update_particle_dict()
+            # if list(pipeline.particles.keys())[1:] != cv_list:
+            pipeline.update_particle_dict()
 
         # save the particle to memory
         for pip_id in self.pipelines.keys():
@@ -804,9 +804,6 @@ class ParticleLink(Link):
             pipeline = self.pipelines[pip_id]
             [cv_list, cv_dis] = pipeline.vehicles
             [pr_cv_list, pr_cv_dis] = pipeline.previous_vehicles
-
-            # print("current cv", cv_list, cv_dis)
-            # print("previous cv", pr_cv_list, pr_cv_dis)
 
             cv_dis_dict = {}
             for iv in range(len(cv_list)):
@@ -835,7 +832,6 @@ class ParticleLink(Link):
                     critical_cv[pr_vid] = {"speed": cv_dis_dict[pr_vid] - pr_dis_dict[pr_vid],
                                            "headway": [pr_dis_dict[pr_cv_list[vdx + 1]] - pr_dis_dict[pr_vid]],
                                            "dis": pr_dis_dict[pr_vid]}
-                # print(pr_vid, critical_cv[pr_vid])
 
             # determine the weight of the particles
             particle_weights = [1 for temp in range(particle_number)]
@@ -853,7 +849,7 @@ class ParticleLink(Link):
                         if headway < 2.5:
                             local_weight = 0.1
                             particles[vid][pdx] = [locations[1:], lanes_info[1:]]
-                        if speed < 1 and headway > 10:
+                        if speed < 1 and headway > 11:
                             particles[vid][pdx] = [[critical_cv[vid]["dis"] + 7] + locations, [None] + lanes_info]
                             local_weight = 0.1
                         particle_weights[pdx] *= local_weight
@@ -861,7 +857,7 @@ class ParticleLink(Link):
                         temp_weight_list = []
                         headway_list = np.sort(critical_cv[vid]["headway"])
                         for headway in headway_list:
-                            if speed < 1 and headway > 10:
+                            if speed < 1 and headway > 11:
                                 particles[vid][pdx] = [[critical_cv[vid]["dis"] + 7], [None]]
                                 temp_weight_list.append(0.1)
                                 break
@@ -1025,13 +1021,21 @@ class ParticleLink(Link):
             pipeline = self.pipelines[pip_id]
             pipeline_dict[pipeline.index] = pipeline.id
 
-        # stochastic car-following model
+        # initiate the pipeline lane change dict
+        particle_lane_change_dict = {}              # dict = {"pip_id", [[cut_in_dis,...], [], ]}
+        for pip_id in self.pipelines.keys():
+            pipeline = self.pipelines[pip_id]
+            particle_lane_change_dict[pipeline.id] = [[[], []] for val in range(pipeline.particle_number)]
+
+        particle_lane_change_flag = False
+
+        # Part 1: without lane changing from outside...
         for pip_id in self.pipelines.keys():
             pipeline = self.pipelines[pip_id]
             particles = pipeline.particles
             direction = pipeline.direction
-            mean_lane_change_dis = max(25, pipeline.length / 6)
-            lane_change_variance = max(5, pipeline.length / 8)
+
+            # clear the out flow buffer
             pipeline.outflow = {}
 
             for i_dir in direction:
@@ -1128,10 +1132,11 @@ class ParticleLink(Link):
                             latest_lane_infos.append(lane_change)
                             continue
 
-                        lane_change_dis = norm.rvs(mean_lane_change_dis, lane_change_variance, 1)[0]
-                        lane_change_dis = np.clip(lane_change_dis,
-                                                  mean_lane_change_dis - lane_change_variance,
-                                                  mean_lane_change_dis + lane_change_variance)
+                        # keep in the lane
+                        if location < 25:
+                            latest_locations.append(location)
+                            latest_lane_infos.append(lane_change)
+                            continue
 
                         current_index = pipeline.index
                         dest_pip_id = int(current_index + np.sign(lane_change - current_index))
@@ -1139,10 +1144,8 @@ class ParticleLink(Link):
                         destination_pipeline = self.pipelines[dest_pip_id]
                         start_dis = destination_pipeline.start_dis
 
-                        lane_change_dis = min(lane_change_dis, start_dis)
-
                         # keep in the lane
-                        if location < lane_change_dis:
+                        if location < start_dis:
                             latest_locations.append(location)
                             latest_lane_infos.append(lane_change)
                             continue
@@ -1160,29 +1163,55 @@ class ParticleLink(Link):
                                 latest_lane_infos.append(lane_change_list[::-1][i_v])
                                 continue
                             else:
-                                insert_index = 0
-                                for i_dis in range(len(destination_dis)):
-                                    if location > destination_dis[i_dis]:
-                                        insert_index = i_dis
-                                        break
-                                destination_cv_list = ["start"] + destination_cv
-                                insert_cv = destination_cv_list[insert_index]
-                                [dest_dis, dest_lane] = self.pipelines[dest_pip_id].particles[insert_cv][pdx]
+                                # Finally lane change success...
+                                # do not store the current particle but push it to processed in the future
+                                particle_lane_change_dict[dest_pip_id][pdx][0].append(location_list[::-1][i_v])
+                                particle_lane_change_dict[dest_pip_id][pdx][1].append(lane_change_list[::-1][i_v])
+                                particle_lane_change_flag = True
+                                # insert_index = 0
+                                # for i_dis in range(len(destination_dis)):
+                                #     if location > destination_dis[i_dis]:
+                                #         insert_index = i_dis
+                                #         break
+                                # destination_cv_list = ["start"] + destination_cv
+                                # insert_cv = destination_cv_list[insert_index]
+                                # [dest_dis, dest_lane] = self.pipelines[dest_pip_id].particles[insert_cv][pdx]
+                                #
+                                # if len(dest_dis) == 0:
+                                #     new_dest_dis, new_dest_lane = [location], [lane_change]
+                                # else:
+                                #     insert_index = 0
+                                #     for i_dis in range(len(dest_dis)):
+                                #         if location < dest_dis[i_dis]:
+                                #             insert_index = i_dis
+                                #             break
+                                #     new_dest_dis = dest_dis[:insert_index] + [location] + dest_dis[insert_index:]
+                                #     new_dest_lane = dest_lane[:insert_index] + [lane_change] + dest_lane[
+                                #                                                                insert_index:]
+                                #
+                                # pipeline.particles[insert_cv][pdx] = [new_dest_dis, new_dest_lane]
 
-                                if len(dest_dis) == 0:
-                                    new_dest_dis, new_dest_lane = [location], [lane_change]
-                                else:
-                                    insert_index = 0
-                                    for i_dis in range(len(dest_dis)):
-                                        if location < dest_dis[i_dis]:
-                                            insert_index = i_dis
-                                            break
-                                    new_dest_dis = dest_dis[:insert_index] + [location] + dest_dis[insert_index:]
-                                    new_dest_lane = dest_lane[:insert_index] + [lane_change] + dest_lane[
-                                                                                               insert_index:]
+                    final_locations = latest_locations[::-1]
+                    final_lanes = latest_lane_infos[::-1]
+                    cut_index = 0
+                    for loc_index in range(len(final_locations)):
+                        if final_locations[loc_index] > 0:
+                            cut_index = loc_index
+                            break
+                    if cut_index > 0:
+                        print("Cut in index", cut_index, "of location:", final_locations)
 
-                                pipeline.particles[insert_cv][pdx] = [new_dest_dis, new_dest_lane]
                     pipeline.particles[cv_id][pdx] = [latest_locations[::-1], latest_lane_infos[::-1]]
+
+        # deal with the vehicle to be inserted
+        if particle_lane_change_flag:
+            for pip_id in particle_lane_change_dict.keys():
+                pipeline = self.pipelines[pip_id]
+
+                for pdx in range(pipeline.particle_number):
+                    [original_loc, original_lane] = pipeline.particles["start"][pdx]
+                    [new_loc, new_lane] = particle_lane_change_dict[pip_id][pdx]
+                    pipeline.particles["start"][pdx] = [new_loc + original_loc, new_lane + original_lane]
 
     def get_lane_belonged_pipeline(self, lane_id):
         for pip_id in self.pipelines.keys():
@@ -1251,6 +1280,7 @@ class PipeLine(object):
         # start ----- cv1 ----- cv2 ----- ...
         # {"start": [[distance1 < distance2 <...], [dest_pip1, dest_pip2, ...]]}
         self.particles = {"start": [[[], []]] * particle_number}
+        self.particle_weights = []
 
     def update_particle_dict(self):
         # the change of the CV includes three parts: arrival, departure, and lane change

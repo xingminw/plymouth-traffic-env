@@ -14,7 +14,7 @@ class SimplifiedModel(object):
         # self.minimum_sigma = 0.8
 
         self.particle_sigma_max = 5
-        self.particle_sigma_min = 0.4
+        self.particle_sigma_min = 1
 
     def _get_mean(self, headway):
         """
