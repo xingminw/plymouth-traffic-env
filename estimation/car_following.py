@@ -28,7 +28,7 @@ class SimplifiedModel(object):
             return 0
         elif headway <= self.free_density:
             proportion = (headway - self.jam_density) / (self.free_density - self.jam_density)
-            mean_speed = proportion * self.free_flow_speed
+            mean_speed = pow(proportion, 0.8) * self.free_flow_speed
             return mean_speed
         elif headway > self.free_density:
             return self.free_flow_speed
@@ -37,15 +37,19 @@ class SimplifiedModel(object):
 
     def _get_disturbed_speed(self, headway):
         mean_speed = self._get_mean(headway)
-        if headway <= self.jam_density:
+        if headway <= self.jam_density * 2:
             offset = 0
         elif headway < self.free_density:
             proportion = (headway - self.jam_density) / (self.free_density - self.jam_density)
-            variance = proportion * self.maximum_sigma
+            variance = pow(proportion, 0.8) * self.maximum_sigma
             offset = norm.rvs(0, variance, 1)[0]
         else:
             offset = norm.rvs(0, self.maximum_sigma, 1)[0]
-        return mean_speed + offset
+
+        speed = mean_speed + offset
+        if headway >= self.jam_density:
+            speed = min(speed, headway - self.jam_density)
+        return max(0, speed)
 
     def _get_speed_list(self, location_list):
         headway_list = np.diff(location_list)

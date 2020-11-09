@@ -3,9 +3,9 @@ inherit the whole class of traffic env and add a particle filter estimation part
 """
 
 from abc import ABC
-from scipy.stats import uniform
-from copy import deepcopy
 from time import sleep
+from copy import deepcopy
+from scipy.stats import uniform, norm
 from estimation.car_following import SimplifiedModel
 from traffic_envs.traffic_env import SignalizedNetwork, Link
 from traffic_envs.utils import\
@@ -659,7 +659,7 @@ class EstimatedNetwork(SignalizedNetwork, ABC):
                     print("previous vehicles:", previous_vehicles)
                     print("current vehicles:", current_vehicles)
                     print("Exit vehicles:", pipeline.exit_cv)
-                    exit("Something strange happens, more than one CVs exit, it SUMO's error!")
+                    # exit("Something strange happens, more than one CVs exit, it SUMO's error!")
                 if len(pipeline.enter_cv) > 1:
                     sleep(1)
                     print()
@@ -668,7 +668,7 @@ class EstimatedNetwork(SignalizedNetwork, ABC):
                     print("previous vehicles:", previous_vehicles)
                     print("current vehicles:", current_vehicles)
                     print("Enter vehicles:", )
-                    exit("Something strange happens, more than one CVs enter, it SUMO's error!")
+                    # exit("Something strange happens, more than one CVs enter, it SUMO's error!")
 
                 # if len(pipeline.lane_change_out) > 0:
                 #     print("Lane change out detected for pipeline", pipeline.id, ":", pipeline.lane_change_out)
@@ -847,13 +847,13 @@ class ParticleLink(Link):
                 local_particle = particles[vid]
                 for pdx in range(particle_number):
                     [locations, lanes_info] = local_particle[pdx]
-                    if len(locations) > 1:
+                    if len(locations) >= 1:
                         headway = locations[0] - critical_cv[vid]["dis"]
                         local_weight = self.car_following.get_weight(headway, speed)
                         if headway < 2.5:
                             local_weight = 0.1
                             particles[vid][pdx] = [locations[1:], lanes_info[1:]]
-                        if speed < 1 and headway > 11:
+                        if speed < 1 and headway > 10:
                             particles[vid][pdx] = [[critical_cv[vid]["dis"] + 7] + locations, [None] + lanes_info]
                             local_weight = 0.1
                         particle_weights[pdx] *= local_weight
@@ -861,7 +861,7 @@ class ParticleLink(Link):
                         temp_weight_list = []
                         headway_list = np.sort(critical_cv[vid]["headway"])
                         for headway in headway_list:
-                            if speed < 1 and headway > 11:
+                            if speed < 1 and headway > 10:
                                 particles[vid][pdx] = [[critical_cv[vid]["dis"] + 7], [None]]
                                 temp_weight_list.append(0.1)
                                 break
@@ -1030,6 +1030,8 @@ class ParticleLink(Link):
             pipeline = self.pipelines[pip_id]
             particles = pipeline.particles
             direction = pipeline.direction
+            mean_lane_change_dis = max(25, pipeline.length / 6)
+            lane_change_variance = max(5, pipeline.length / 8)
             pipeline.outflow = {}
 
             for i_dir in direction:
@@ -1119,22 +1121,28 @@ class ParticleLink(Link):
                             latest_locations.append(location)
                             latest_lane_infos.append(lane_change)
                             continue
-                        if location < 20:
-                            latest_locations.append(location)
-                            latest_lane_infos.append(lane_change)
-                            continue
+
+                        # already in the destination lane
                         if lane_change == pipeline.index:
                             latest_locations.append(location)
                             latest_lane_infos.append(lane_change)
                             continue
+
+                        lane_change_dis = norm.rvs(mean_lane_change_dis, lane_change_variance, 1)[0]
+                        lane_change_dis = np.clip(lane_change_dis,
+                                                  mean_lane_change_dis - lane_change_variance,
+                                                  mean_lane_change_dis + lane_change_variance)
+
                         current_index = pipeline.index
                         dest_pip_id = int(current_index + np.sign(lane_change - current_index))
                         dest_pip_id = pipeline_dict[dest_pip_id]
                         destination_pipeline = self.pipelines[dest_pip_id]
                         start_dis = destination_pipeline.start_dis
 
+                        lane_change_dis = min(lane_change_dis, start_dis)
+
                         # keep in the lane
-                        if location < start_dis:
+                        if location < lane_change_dis:
                             latest_locations.append(location)
                             latest_lane_infos.append(lane_change)
                             continue
