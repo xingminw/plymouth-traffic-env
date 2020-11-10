@@ -42,7 +42,7 @@ class EstimatedNetwork(SignalizedNetwork, ABC):
         SignalizedNetwork.__init__(self)
 
         # number of particles
-        self.particle_number = 50
+        self.particle_number = 20
 
         # number of grid size
         self.grid_size = 15
@@ -93,7 +93,11 @@ class EstimatedNetwork(SignalizedNetwork, ABC):
             if self.output_cost:
                 self.output_network_performance()
 
-            self._output_particle_time_space()
+            # output single link time-space diagram and density matrix
+            # self._output_particle_time_space()
+
+            # output the corridor time-space diagram and density matrix
+            self._output_corridor_estimation()
 
             # close simulator
             print("Close simulation with random seeds", self.sumo_seed, "done.")
@@ -102,11 +106,180 @@ class EstimatedNetwork(SignalizedNetwork, ABC):
             self._is_open = False
         delete_buffer_file(self.sumo_seed)
 
+    def _output_corridor_estimation(self, image_type="png"):
+        folder = env_config.output_trajs_folder
+        if not os.path.exists(folder):
+            os.mkdir(folder)
+
+        w2e_list = env_config.corridor_w2e
+        e2w_list = env_config.corridor_e2w
+
+        intersection_name = env_config.intersection_name_list
+        link_list = [w2e_list, e2w_list]
+        intersection_name_list = [intersection_name, intersection_name[::-1]]
+
+        for idx in range(2):
+            local_links = link_list[idx]
+            intersection_names = intersection_name_list[idx]
+
+            # output the time-space diagram
+            plt.figure(figsize=[10, 10], dpi=500)
+            start_dis = 0
+            buffer = 5
+            landmark_list = []
+            for link_id in local_links:
+                link = self.links[link_id]
+                pipelines = link.pipelines
+
+                signal_state_list = None
+
+                # plot the signal state
+                enter_edge = link.edge_list[-1]
+                edge = self.edges[enter_edge]
+                lane_list = edge.lanes_list
+                for lane_id in lane_list:
+                    lane = self.lanes[lane_id]
+                    if lane.controlled_movement is not None:
+                        [signal_id, movement_id] = lane.controlled_movement
+                        movement = self.signals[signal_id].movements[movement_id]
+
+                        direction = movement.direction
+                        if direction == "s":
+                            signal_state_list = movement.state_list
+
+                if signal_state_list is not None:
+                    for jdx in range(len(signal_state_list)):
+                        signal_state = signal_state_list[jdx]
+                        x_list = [jdx, jdx + 1]
+                        y_list = [start_dis + link.length] * 2
+                        if signal_state >= 1:
+                            plt.plot(x_list, y_list, "g", lw=1.8)
+                        else:
+                            plt.plot(x_list, y_list, "r", lw=1.8)
+
+                for pip_id in pipelines.keys():
+                    pipeline = pipelines[pip_id]
+                    directions = pipeline.direction
+                    if directions == "l":
+                        continue
+
+                    cv_trajs = pipeline.cv_trajs
+                    particles = pipeline.particle_history
+
+                    particle_t = []
+                    particle_s = []
+                    for itime in particles.keys():
+                        locations = particles[itime]
+                        for val in locations:
+                            particle_t += [itime] * len(val)
+                            particle_s += val
+
+                    for vid in cv_trajs.keys():
+                        [vt, vd] = cv_trajs[vid]
+                        plt.plot(vt, [val + start_dis for val in vd], "-", color="b", linewidth=0.5)
+
+                    for vid in pipeline.non_cv_trajs.keys():
+                        [vt, vd] = pipeline.non_cv_trajs[vid]
+                        plt.plot(vt, [val + start_dis for val in vd], "--", color="b", linewidth=0.5, alpha=1)
+
+                    particle_s = [val + start_dis for val in particle_s]
+                    plt.plot(particle_t, particle_s, ".", color="k", alpha=0.6 / self.particle_number,
+                             markersize=0.5)
+                start_dis = start_dis + link.length + buffer
+                landmark_list.append(start_dis)
+            landmark_list = landmark_list[:-1]
+            plt.yticks(landmark_list, intersection_names)
+            plt.xlim([0, self.time_step])
+            plt.ylim([0, landmark_list[-1] + buffer * 5])
+            # plt.tight_layout()
+            plt.xlabel("Time (s)")
+            plt.ylabel("Distance")
+            plt.savefig(folder + "/corridor_ts_" + str(idx) + "." + image_type)
+            plt.close()
+
+            # output the ground density matrix
+            start_num = 0
+            landmark_list = []
+
+            corridor_density_matrix = None
+            corridor_observed_matrix = None
+            corridor_estimation_matrix = None
+
+            for link_id in local_links:
+                link = self.links[link_id]
+                pipelines = link.pipelines
+
+                pip_counts = 0
+                agg_density_matrix = None
+                agg_observed_matrix = None
+                agg_estimation_matrix = None
+                for pip_id in pipelines.keys():
+                    pipeline = pipelines[pip_id]
+                    if pipeline.start_dis > 5:
+                        continue
+                    pip_counts += 1
+                    density_matrix = np.transpose(pipeline.density_matrix)
+                    observed_matrix = np.transpose(pipeline.observed_density)
+                    estimation_matrix = np.transpose(pipeline.real_time_density)
+
+                    if agg_density_matrix is None:
+                        agg_density_matrix = density_matrix
+                        agg_observed_matrix = observed_matrix
+                        agg_estimation_matrix = estimation_matrix
+                    else:
+                        agg_density_matrix = density_matrix + agg_density_matrix
+                        agg_observed_matrix = observed_matrix + agg_observed_matrix
+                        agg_estimation_matrix = estimation_matrix + agg_estimation_matrix
+                agg_density_matrix = agg_density_matrix / pip_counts
+                agg_observed_matrix = agg_observed_matrix / pip_counts
+                agg_estimation_matrix = agg_estimation_matrix / pip_counts
+
+                if corridor_density_matrix is None:
+                    corridor_density_matrix = agg_density_matrix
+                    corridor_observed_matrix = agg_observed_matrix
+                    corridor_estimation_matrix = agg_estimation_matrix
+                else:
+                    corridor_estimation_matrix = \
+                        np.concatenate((agg_estimation_matrix, corridor_estimation_matrix), axis=0)
+                    corridor_density_matrix = \
+                        np.concatenate((agg_density_matrix, corridor_density_matrix), axis=0)
+                    corridor_observed_matrix = \
+                        np.concatenate((agg_observed_matrix, corridor_observed_matrix), axis=0)
+
+                (m, n) = np.shape(agg_density_matrix)
+                start_num += m
+                landmark_list.append(start_num)
+
+            plt.figure(figsize=[10, 10], dpi=300)
+            plt.yticks(landmark_list, intersection_names)
+            plt.ylim([0, landmark_list[-2] + 5])
+            plt.imshow(corridor_estimation_matrix[::-1],
+                       cmap="binary", aspect="auto", vmin=0, vmax=np.ceil(self.grid_size / 7))
+            plt.savefig(folder + "/corridor_estimation_" + str(idx) + "." + image_type)
+            plt.close()
+
+            plt.figure(figsize=[10, 10], dpi=300)
+            plt.yticks(landmark_list, intersection_names)
+            plt.ylim([0, landmark_list[-2] + 5])
+            plt.imshow(corridor_density_matrix[::-1],
+                       cmap="binary", aspect="auto", vmin=0, vmax=np.ceil(self.grid_size / 7))
+            plt.savefig(folder + "/corridor_density_" + str(idx) + "." + image_type)
+            plt.close()
+
+            plt.figure(figsize=[10, 10], dpi=300)
+            plt.yticks(landmark_list, intersection_names)
+            plt.ylim([0, landmark_list[-2] + 5])
+            plt.imshow(corridor_observed_matrix[::-1],
+                       cmap="binary", aspect="auto", vmin=0, vmax=np.ceil(self.grid_size / 7))
+            plt.savefig(folder + "/corridor_observed_" + str(idx) + "." + image_type)
+            plt.close()
+
     def _output_particle_time_space(self):
         folder = env_config.output_trajs_folder
         if not os.path.exists(folder):
             os.mkdir(folder)
 
+        # draw the time-space diagram
         for link_id in self.links.keys():
             link = self.links[link_id]
             if link.link_type == "wrong" or link.link_type == "sink":
@@ -118,8 +291,6 @@ class EstimatedNetwork(SignalizedNetwork, ABC):
             count = 0
             for pip_id in pipelines.keys():
                 pipeline = pipelines[pip_id]
-                # print(pipeline.lane_list)
-                # print([self.lanes[val].allowable for val in pipeline.lane_list])
                 plt.subplot(2, 2, count + 1)
                 plt.title("Lane " + str(pipeline.id[-1]) + ", " + pipeline.direction +
                           ", " + str(np.round(pipeline.arrival_rate, 4)))
@@ -675,7 +846,7 @@ class ParticleLink(Link):
         self.particle_arrival = None
 
     def particle_forward(self, time_step):
-        if self.link_type == "sink" or self.link_type == "wrong":
+        if self.link_type == "wrong" or self.link_type == "sink":
             return
         pipelines = self.pipelines
 
