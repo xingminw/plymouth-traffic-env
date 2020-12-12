@@ -1136,6 +1136,10 @@ class SignalizedNetwork(gym.Env, ABC):
         # currently ignore the "dummy" link
         self._generate_link_movement(debug=False)
 
+        # display link by link
+        # this is for the hard code the mapping relationship between the sumo model and the ctm model
+        # self._display_link_by_link()
+
         self._generate_link_segment_and_pipeline(debug=False)
 
         # load turning ratio
@@ -1236,6 +1240,22 @@ class SignalizedNetwork(gym.Env, ABC):
                 self.junctions[downstream_junction_id].enter_edges.append(edge_id)
             if upstream_junction_id is not None:
                 self.junctions[upstream_junction_id].exit_edges.append(edge_id)
+
+    def _display_link_by_link(self):
+        for master_link in self.links.keys():
+            plt.figure(figsize=[12, 5.5])
+
+            for link_id in self.links.keys():
+                link = self.links[link_id]
+                link_shape = link.shape
+                plt.plot(link_shape[0], link_shape[1], "k-", lw=1, alpha=0.5)
+
+            chosen_link = self.links[master_link]
+            print("Current link id", chosen_link.link_id)
+            print()
+            link_shape = chosen_link.shape
+            plt.plot(link_shape[0], link_shape[1], "r-", lw=1)
+            plt.show()
 
     def _generate_link_movement(self, debug=False):
         # choose lane 0 as the shape of the edge, so does the length

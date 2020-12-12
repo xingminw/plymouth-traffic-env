@@ -42,7 +42,7 @@ class EstimatedNetwork(SignalizedNetwork, ABC):
         SignalizedNetwork.__init__(self)
 
         # number of particles
-        self.particle_number = 20
+        self.particle_number = 1
 
         # number of grid size
         self.grid_size = 15
@@ -94,7 +94,7 @@ class EstimatedNetwork(SignalizedNetwork, ABC):
                 self.output_network_performance()
 
             # output single link time-space diagram and density matrix
-            # self._output_particle_time_space()
+            self._output_particle_time_space()
 
             # output the corridor time-space diagram and density matrix
             self._output_corridor_estimation()

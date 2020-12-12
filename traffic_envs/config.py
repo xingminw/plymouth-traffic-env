@@ -10,7 +10,7 @@ os.environ["SUMO_HOME"] = "C://Program Files (x86)//Eclipse//Sumo"
 # os.environ["SUMO_HOME"] = "/home/xingminw/Anaconda3/envs/traffic-env"
 
 # gui mode, true to use traci, false to use libsumo, check your installment of libsumo
-GUI_MODE = False
+GUI_MODE = True
 
 # random mode, true to use random demand, false to use the fixed random seed
 RANDOM_MODE = True

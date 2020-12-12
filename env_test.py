@@ -6,9 +6,9 @@ import numpy as np
 from pstats import SortKey
 from policy.null_policy import NullPolicy as Controller
 
-print("Using the default actuate controller")
 # from traffic_envs.traffic_env import SignalizedNetwork
 from estimation.particle import EstimatedNetwork
+print("Using the default actuate controller")
 
 PROFILE_MODE = True
 
