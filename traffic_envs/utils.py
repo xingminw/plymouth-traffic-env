@@ -25,7 +25,8 @@ def generate_new_route_configuration(sumo_seed=None, relative_demand=1):
     output_flow_file = os.path.join(config.sumo_configuration_buffer_folder, "flow_" + str(sumo_seed) + ".xml")
     flow_tree.write(output_flow_file)
 
-    common_cmd = ["jtrrouter", "--flow-files=" + output_flow_file,
+    jtrrouter = os.path.join(os.environ['SUMO_HOME'], 'bin/jtrrouter')
+    common_cmd = [jtrrouter, "--flow-files=" + output_flow_file,
                   "--turn-ratio-files=" + config.turning_ratio_file,
                   "--net-file=" + config.network_xml_file_template]
     if config.RANDOM_MODE:
