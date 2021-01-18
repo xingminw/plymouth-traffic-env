@@ -28,6 +28,7 @@ if not os.path.exists(output_weights_folder):
 
 network_topology_folder = "sumo"
 network_xml_file_template = "./sumo/plymouthv8.net.xml"
+network_xml_file_actuated = "./sumo/actuate.xml"
 network_xml_file = "network.xml"
 network_flow_file = "./sumo/FlowProperty.xml"
 configuration_file_template = "./sumo/plymouthv8Routes.sumocfg"

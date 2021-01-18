@@ -12,6 +12,7 @@ from glob import glob
 from copy import deepcopy
 from random import random
 from scipy.stats import binom
+from shutil import copyfile
 
 from traffic_envs.utils import\
     generate_new_route_configuration, delete_buffer_file
@@ -558,6 +559,8 @@ class SignalizedNetwork(gym.Env, ABC):
         # generate new arrival file
         configuration_file_name, loaded_vehicles_list =\
             generate_new_route_configuration(self.sumo_seed, self.relative_demand)
+        if self.actuate_control:
+            copyfile(config.network_xml_file_actuated, config.buffer_network_xml)
         self.loaded_list = np.cumsum(loaded_vehicles_list)
 
         print("Start new simulation with random seeds", self.sumo_seed, "...")
@@ -1086,6 +1089,9 @@ class SignalizedNetwork(gym.Env, ABC):
             phase_num = len(subroot)
             phase_id = 0
             for subsubroot in subroot:
+                if subsubroot.tag != "phase":
+                    continue
+
                 phase = Phase(signal_id + "+" + str(phase_id))
                 phase.signal_id = signal_id
                 phase.signal_state = subsubroot.attrib["state"]
