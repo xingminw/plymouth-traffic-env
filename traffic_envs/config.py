@@ -6,7 +6,7 @@ from shutil import copyfile, rmtree
 # customize your own sumo env address!!
 # for windows system, choose the place you install sumo
 # TODO: add auto-recognition of the sumo folder path
-os.environ["SUMO_HOME"] = "C://Program Files (x86)//Eclipse//Sumo"
+# os.environ["SUMO_HOME"] = "C://Program Files (x86)//Eclipse//Sumo"
 # os.environ["SUMO_HOME"] = "/home/xingminw/Anaconda3/envs/traffic-env"
 
 # gui mode, true to use traci, false to use libsumo, check your installment of libsumo
@@ -28,6 +28,7 @@ if not os.path.exists(output_weights_folder):
 
 network_topology_folder = "sumo"
 network_xml_file_template = "./sumo/plymouthv8.net.xml"
+network_xml_file_actuated = "./sumo/actuate.xml"
 network_xml_file = "network.xml"
 network_flow_file = "./sumo/FlowProperty.xml"
 configuration_file_template = "./sumo/plymouthv8Routes.sumocfg"
